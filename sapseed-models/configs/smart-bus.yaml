@@ -1,0 +1,37 @@
+# Master "smart bus" detection dataset (21 classes).
+#
+# This is the consolidated class taxonomy produced by the Kaggle dataset
+# preparation notebook and used to fine-tune YOLO11n as the bus "smart eyes".
+#
+# Reference: https://www.kaggle.com/code/tsaty01/sapseed-model
+#
+# `train` is a class-oversampled manifest (train_oversampled.txt) written by
+# the notebook to rebalance rare classes; `val`/`test` are plain image dirs.
+path: /kaggle/working/smart-bus-dataset/final_master_clean
+
+train: train_oversampled.txt
+val: images/val
+test: images/test
+
+names:
+  0: person
+  1: bicycle
+  2: motorcycle
+  3: autorickshaw
+  4: car
+  5: bus
+  6: truck
+  7: pothole
+  8: longitudinal_crack
+  9: transverse_crack
+  10: alligator_crack
+  11: damaged_road
+  12: waterlogging
+  13: manhole
+  14: traffic_sign
+  15: traffic_light
+  16: zebra_crossing
+  17: road_divider
+  18: animal
+  19: speed_bump
+  20: unsurfaced_road

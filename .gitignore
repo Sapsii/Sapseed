@@ -1,0 +1,36 @@
+# IDE and OS
+.idea/
+*.iml
+.DS_Store
+
+# Gradle / Android
+.gradle/
+.kotlin/
+**/build/
+!src/**/build/
+local.properties
+captures/
+sapseed-edge/device-benchmarks/
+.externalNativeBuild/
+.cxx/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Datasets, training runs, and generated model binaries
+sapseed-models/datasets/
+sapseed-models/runs/
+sapseed-models/artifacts/
+*.pt
+*.onnx
+!sapseed-edge/androidApp/src/main/assets/*.onnx
+*.tflite
+!sapseed-edge/androidApp/src/main/assets/*.tflite
+*.torchscript
+
+node_modules/

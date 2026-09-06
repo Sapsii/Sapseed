@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sapseed-models"
+version = "0.1.0"
+description = "Training, evaluation, and export tooling for Sapseed edge models"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "matplotlib>=3.8",
+    "numpy>=1.26",
+    "opencv-python>=4.9",
+    "psutil>=5.9",
+    "torch==2.13.0",
+    "torchvision==0.28.0",
+    "ultralytics>=8.3,<9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.11",
+]
+export = [
+    "onnx>=1.12,<2",
+    "onnxslim>=0.1.82",
+    "onnx2tf>=2.6.8,<3",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
+torchvision = { index = "pytorch-cu130" }
+
+[tool.setuptools]
+packages = []
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

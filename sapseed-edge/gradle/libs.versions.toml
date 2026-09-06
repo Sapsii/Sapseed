@@ -1,0 +1,29 @@
+[versions]
+agp = "9.0.1"
+android-compileSdk = "36"
+android-minSdk = "24"
+android-targetSdk = "36"
+activity = "1.13.0"
+cameraX = "1.5.3"
+coroutines = "1.10.2"
+kotlin = "2.4.10"
+liteRt = "1.4.2"
+onnxRuntime = "1.29.0"
+
+[libraries]
+kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
+androidx-activity = { module = "androidx.activity:activity", version.ref = "activity" }
+androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "cameraX" }
+androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "cameraX" }
+androidx-camera-view = { module = "androidx.camera:camera-view", version.ref = "cameraX" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+litert = { module = "com.google.ai.edge.litert:litert", version.ref = "liteRt" }
+litert-gpu = { module = "com.google.ai.edge.litert:litert-gpu", version.ref = "liteRt" }
+litert-gpu-api = { module = "com.google.ai.edge.litert:litert-gpu-api", version.ref = "liteRt" }
+onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxRuntime" }
+
+[plugins]
+androidApplication = { id = "com.android.application", version.ref = "agp" }
+androidMultiplatformLibrary = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
+kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
