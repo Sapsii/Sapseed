@@ -6,7 +6,7 @@ import android.os.Debug
 import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
-import app.sapsii.sapseed.edge.android.camera.AndroidVideoFrame
+import app.sapsii.sapseed.edge.android.camera.RgbaVideoFrame
 import app.sapsii.sapseed.edge.android.inference.LiteRtExecutionProvider
 import app.sapsii.sapseed.edge.android.inference.OnnxExecutionProvider
 import app.sapsii.sapseed.edge.android.inference.Yolo11LiteRtDetector
@@ -86,7 +86,7 @@ class DeviceBenchmarkRunner(
 
         return try {
             repeat(warmupIterations) { index ->
-                val frame = nextAndroidFrame()
+                val frame = nextRgbaFrame()
                 try {
                     detector.benchmark(frame)
                     Log.i(LOG_TAG, "provider=$provider warmup=${index + 1}/$warmupIterations")
@@ -97,7 +97,7 @@ class DeviceBenchmarkRunner(
 
             val samples = ArrayList<DeviceBenchmarkSample>(measuredIterations)
             repeat(measuredIterations) { index ->
-                val frame = nextAndroidFrame()
+                val frame = nextRgbaFrame()
                 try {
                     val timing = detector.benchmark(frame)
                     val sample = DeviceBenchmarkSample(
@@ -144,10 +144,10 @@ class DeviceBenchmarkRunner(
         }
     }
 
-    private suspend fun nextAndroidFrame(): AndroidVideoFrame {
+    private suspend fun nextRgbaFrame(): RgbaVideoFrame {
         val frame = frameSource.nextFrame() ?: error("Camera frame source closed")
-        return frame as? AndroidVideoFrame
-            ?: error("YOLO Android benchmark requires Android camera frames")
+        return frame as? RgbaVideoFrame
+            ?: error("YOLO benchmark requires an RGBA frame source")
     }
 
     companion object {

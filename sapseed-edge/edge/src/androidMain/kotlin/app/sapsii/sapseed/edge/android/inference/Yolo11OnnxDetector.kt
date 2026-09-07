@@ -13,6 +13,7 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import androidx.camera.core.ImageProxy
 import app.sapsii.sapseed.edge.android.camera.AndroidVideoFrame
+import app.sapsii.sapseed.edge.android.camera.RgbaVideoFrame
 import app.sapsii.sapseed.edge.model.Detection
 import kotlin.math.max
 import kotlin.math.min
@@ -53,60 +54,69 @@ class Yolo11OnnxDetector(
         require(iouThreshold in 0f..1f)
     }
 
-    override suspend fun detect(frame: AndroidVideoFrame): List<Detection> = benchmark(frame).detections
-
-    override suspend fun benchmark(frame: AndroidVideoFrame): YoloBenchmarkSample = withContext(Dispatchers.Default) {
-        val totalStarted = SystemClock.elapsedRealtimeNanos()
-
-        val preprocessStarted = SystemClock.elapsedRealtimeNanos()
-        val prepared = preprocess(frame.image, frame.rotationDegrees)
-        val tensor = OnnxTensor.createTensor(
-            environment,
-            prepared.values,
-            longArrayOf(1, 3, inputSize.toLong(), inputSize.toLong()),
-        )
-        val preprocessMs = preprocessStarted.elapsedMilliseconds()
-
-        try {
-            val inferenceStarted = SystemClock.elapsedRealtimeNanos()
-            val result = session.run(mapOf(inputName to tensor))
-            val inferenceMs = inferenceStarted.elapsedMilliseconds()
-
-            result.use {
-                val postprocessStarted = SystemClock.elapsedRealtimeNanos()
-
-                @Suppress("UNCHECKED_CAST")
-                val output = (it[0] as OnnxTensor).value as Array<Array<FloatArray>>
-                val detections = postprocessor.decode(output[0], prepared.transform)
-                val postprocessMs = postprocessStarted.elapsedMilliseconds()
-                YoloBenchmarkSample(
-                    preprocessMs = preprocessMs,
-                    inferenceMs = inferenceMs,
-                    postprocessMs = postprocessMs,
-                    totalMs = totalStarted.elapsedMilliseconds(),
-                    detections = detections,
-                )
-            }
-        } finally {
-            tensor.close()
+    override suspend fun detect(frame: AndroidVideoFrame): List<Detection> =
+        if (frame.image.format == PixelFormat.RGBA_8888) {
+            benchmark(frame).detections
+        } else {
+            benchmarkPrepared { preprocess(frame) }.detections
         }
-    }
+
+    override suspend fun benchmark(frame: RgbaVideoFrame): YoloBenchmarkSample =
+        benchmarkPrepared { preprocessRgba(frame) }
+
+    private suspend fun benchmarkPrepared(prepare: () -> PreparedInput): YoloBenchmarkSample =
+        withContext(Dispatchers.Default) {
+            val totalStarted = SystemClock.elapsedRealtimeNanos()
+
+            val preprocessStarted = SystemClock.elapsedRealtimeNanos()
+            val prepared = prepare()
+            val tensor = OnnxTensor.createTensor(
+                environment,
+                prepared.values,
+                longArrayOf(1, 3, inputSize.toLong(), inputSize.toLong()),
+            )
+            val preprocessMs = preprocessStarted.elapsedMilliseconds()
+
+            try {
+                val inferenceStarted = SystemClock.elapsedRealtimeNanos()
+                val result = session.run(mapOf(inputName to tensor))
+                val inferenceMs = inferenceStarted.elapsedMilliseconds()
+
+                result.use {
+                    val postprocessStarted = SystemClock.elapsedRealtimeNanos()
+
+                    @Suppress("UNCHECKED_CAST")
+                    val output = (it[0] as OnnxTensor).value as Array<Array<FloatArray>>
+                    val detections = postprocessor.decode(output[0], prepared.transform)
+                    val postprocessMs = postprocessStarted.elapsedMilliseconds()
+                    YoloBenchmarkSample(
+                        preprocessMs = preprocessMs,
+                        inferenceMs = inferenceMs,
+                        postprocessMs = postprocessMs,
+                        totalMs = totalStarted.elapsedMilliseconds(),
+                        detections = detections,
+                    )
+                }
+            } finally {
+                tensor.close()
+            }
+        }
 
     override fun close() {
         session.close()
         sessionOptions.close()
     }
 
-    private fun preprocess(image: ImageProxy, rotationDegrees: Int): PreparedInput =
-        if (image.format == PixelFormat.RGBA_8888) {
-            preprocessRgba(image, rotationDegrees)
+    private fun preprocess(frame: AndroidVideoFrame): PreparedInput =
+        if (frame.image.format == PixelFormat.RGBA_8888) {
+            preprocessRgba(frame)
         } else {
-            preprocessYuv(image, rotationDegrees)
+            preprocessYuv(frame.image, frame.rotationDegrees)
         }
 
-    private fun preprocessRgba(image: ImageProxy, rotationDegrees: Int) = PreparedInput(
+    private fun preprocessRgba(frame: RgbaVideoFrame) = PreparedInput(
         values = inputValues,
-        transform = rgbaPreprocessor.prepare(image, rotationDegrees),
+        transform = rgbaPreprocessor.prepare(frame),
     )
 
     private fun preprocessYuv(image: ImageProxy, rotationDegrees: Int): PreparedInput {

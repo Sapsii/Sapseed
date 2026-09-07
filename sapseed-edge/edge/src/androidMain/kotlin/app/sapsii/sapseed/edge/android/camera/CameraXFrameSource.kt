@@ -4,6 +4,7 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import java.nio.ByteBuffer
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.lifecycle.LifecycleOwner
 import app.sapsii.sapseed.edge.contract.FrameSource
@@ -18,12 +19,15 @@ class AndroidVideoFrame internal constructor(
     val image: ImageProxy,
     override val id: String = UUID.randomUUID().toString(),
     override val capturedAtEpochMilliseconds: Long = System.currentTimeMillis(),
-) : VideoFrame {
+) : RgbaVideoFrame {
     private val released = AtomicBoolean(false)
 
     override val width: Int = image.width
     override val height: Int = image.height
     override val rotationDegrees: Int = image.imageInfo.rotationDegrees
+    override val rgbaBuffer: ByteBuffer get() = image.planes.single().buffer.slice()
+    override val rgbaRowStride: Int get() = image.planes.single().rowStride
+    override val rgbaPixelStride: Int get() = image.planes.single().pixelStride
 
     override fun release() {
         if (released.compareAndSet(false, true)) image.close()
@@ -70,7 +74,7 @@ class CameraXFrameSource(
 
     override fun close() {
         analysis.clearAnalyzer()
-        cameraProvider.unbind(analysis)
+        cameraProvider.unbindAll()
         frames.close()
     }
 }

@@ -2,6 +2,7 @@ package app.sapsii.sapseed.edge.android.inference
 
 import android.os.SystemClock
 import app.sapsii.sapseed.edge.android.camera.AndroidVideoFrame
+import app.sapsii.sapseed.edge.android.camera.RgbaVideoFrame
 import app.sapsii.sapseed.edge.model.Detection
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -36,12 +37,12 @@ class Yolo11LiteRtDetector private constructor(
 
     override suspend fun detect(frame: AndroidVideoFrame): List<Detection> = benchmark(frame).detections
 
-    override suspend fun benchmark(frame: AndroidVideoFrame): YoloBenchmarkSample = withContext(inferenceDispatcher) {
+    override suspend fun benchmark(frame: RgbaVideoFrame): YoloBenchmarkSample = withContext(inferenceDispatcher) {
         val runtime = checkNotNull(interpreter) { "LiteRT detector is not initialized" }
         val totalStarted = SystemClock.elapsedRealtimeNanos()
 
         val preprocessStarted = SystemClock.elapsedRealtimeNanos()
-        val transform = preprocessor.prepare(frame.image, frame.rotationDegrees)
+        val transform = preprocessor.prepare(frame)
         val preprocessMs = preprocessStarted.elapsedMilliseconds()
 
         val inferenceStarted = SystemClock.elapsedRealtimeNanos()

@@ -1,10 +1,10 @@
 package app.sapsii.sapseed.edge.android.inference
 
-import app.sapsii.sapseed.edge.android.camera.AndroidVideoFrame
+import app.sapsii.sapseed.edge.android.camera.RgbaVideoFrame
 import app.sapsii.sapseed.edge.model.Detection
 
 interface YoloBenchmarkDetector : AutoCloseable {
-    suspend fun benchmark(frame: AndroidVideoFrame): YoloBenchmarkSample
+    suspend fun benchmark(frame: RgbaVideoFrame): YoloBenchmarkSample
 }
 
 data class YoloBenchmarkSample(

@@ -6,6 +6,17 @@
     <string name="starting_camera">Starting camera…</string>
     <string name="camera_ready">Camera ready. Point it at a representative scene, then choose a runtime.</string>
     <string name="camera_failed">Unable to start the camera.</string>
+    <string name="camera_source_title">Choose camera</string>
+    <string name="camera_source_mobile">Camera: Mobile</string>
+    <string name="camera_source_wireless">Camera: Wireless</string>
+    <string name="camera_source_discover">Discover wireless camera</string>
+    <string name="camera_source_manual">Enter camera IP or URL</string>
+    <string name="camera_discovering">Looking for a Sapseed ESP32-CAM on this network…</string>
+    <string name="camera_discovery_timeout">No camera found. Check Wi-Fi, or enter its IP manually.</string>
+    <string name="camera_manual_title">Connect wireless camera</string>
+    <string name="camera_ip_hint">192.168.4.1 or http://IP/stream</string>
+    <string name="camera_connect">Connect</string>
+    <string name="camera_connecting">Connecting to wireless camera…</string>
     <string name="benchmark_onnx_cpu">ONNX CPU</string>
     <string name="benchmark_onnx_nnapi">ONNX NNAPI</string>
     <string name="benchmark_litert_cpu">LiteRT CPU</string>

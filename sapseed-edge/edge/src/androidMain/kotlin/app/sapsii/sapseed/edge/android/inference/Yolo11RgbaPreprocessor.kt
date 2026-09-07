@@ -1,7 +1,6 @@
 package app.sapsii.sapseed.edge.android.inference
 
-import android.graphics.PixelFormat
-import androidx.camera.core.ImageProxy
+import app.sapsii.sapseed.edge.android.camera.RgbaVideoFrame
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -21,31 +20,28 @@ internal class Yolo11RgbaPreprocessor(
         .order(ByteOrder.nativeOrder())
     val inputFloats: FloatBuffer = inputBytes.asFloatBuffer()
 
-    fun prepare(image: ImageProxy, rotationDegrees: Int): LetterboxTransform {
-        require(image.format == PixelFormat.RGBA_8888) {
-            "Expected RGBA_8888 camera input, received format ${image.format}"
-        }
+    fun prepare(frame: RgbaVideoFrame): LetterboxTransform {
+        val rotationDegrees = frame.rotationDegrees
         require(rotationDegrees == 0 || rotationDegrees == 90 || rotationDegrees == 180 || rotationDegrees == 270) {
             "Unsupported camera rotation: $rotationDegrees"
         }
-        val rotatedWidth = if (rotationDegrees == 90 || rotationDegrees == 270) image.height else image.width
-        val rotatedHeight = if (rotationDegrees == 90 || rotationDegrees == 270) image.width else image.height
+        val rotatedWidth = if (rotationDegrees == 90 || rotationDegrees == 270) frame.height else frame.width
+        val rotatedHeight = if (rotationDegrees == 90 || rotationDegrees == 270) frame.width else frame.height
         val scale = min(inputSize.toFloat() / rotatedWidth, inputSize.toFloat() / rotatedHeight)
         val scaledWidth = (rotatedWidth * scale).toInt()
         val scaledHeight = (rotatedHeight * scale).toInt()
         val padX = (inputSize - scaledWidth) / 2f
         val padY = (inputSize - scaledHeight) / 2f
-        val plane = image.planes.single()
-        require(plane.pixelStride >= 4) { "Expected four-byte RGBA camera pixels" }
-        val buffer = plane.buffer.slice()
+        require(frame.rgbaPixelStride >= 4) { "Expected four-byte RGBA camera pixels" }
+        val buffer = frame.rgbaBuffer.slice()
         val transform = LetterboxTransform(rotatedWidth, rotatedHeight, scale, padX, padY)
         tensorWriter?.let { writer ->
             writer.write(
                 source = buffer,
-                sourceWidth = image.width,
-                sourceHeight = image.height,
-                sourceRowStride = plane.rowStride,
-                sourcePixelStride = plane.pixelStride,
+                sourceWidth = frame.width,
+                sourceHeight = frame.height,
+                sourceRowStride = frame.rgbaRowStride,
+                sourcePixelStride = frame.rgbaPixelStride,
                 rotationDegrees = rotationDegrees,
                 target = inputBytes,
                 inputSize = inputSize,
@@ -81,20 +77,20 @@ internal class Yolo11RgbaPreprocessor(
 
                     90 -> {
                         sourceX = rotatedY
-                        sourceY = image.height - 1 - rotatedX
+                        sourceY = frame.height - 1 - rotatedX
                     }
 
                     180 -> {
-                        sourceX = image.width - 1 - rotatedX
-                        sourceY = image.height - 1 - rotatedY
+                        sourceX = frame.width - 1 - rotatedX
+                        sourceY = frame.height - 1 - rotatedY
                     }
 
                     else -> {
-                        sourceX = image.width - 1 - rotatedY
+                        sourceX = frame.width - 1 - rotatedY
                         sourceY = rotatedX
                     }
                 }
-                val sourceIndex = sourceY * plane.rowStride + sourceX * plane.pixelStride
+                val sourceIndex = sourceY * frame.rgbaRowStride + sourceX * frame.rgbaPixelStride
                 putPixel(
                     outputIndex = outputIndex,
                     pixelCount = pixelCount,

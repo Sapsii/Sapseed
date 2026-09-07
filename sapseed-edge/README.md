@@ -28,6 +28,16 @@ CameraX frame source
 
 The app requests camera/location permission, displays a live CameraX preview, and includes exported COCO-pretrained YOLO11n ONNX and LiteRT models for real-device benchmarking. Continuous road-damage event inference still waits for the fine-tuned smart-bus checkpoint from the Kaggle pipeline (`../sapseed-models`).
 
+## Camera source
+
+The phone camera remains the default. Tap **Camera: Mobile** at the top of the app to switch sources:
+
+- **Discover wireless camera** finds ESP32-CAM firmware advertising `_sapseedcam._tcp` on the current local network.
+- **Enter camera IP or URL** accepts an IP such as `192.168.4.1` or a complete MJPEG URL such as `http://192.168.4.1/stream`.
+- **Camera: Mobile** switches back to CameraX.
+
+For the companion AI-Thinker firmware, flashing instructions, and direct-AP workflow, see the `SapsiiHardware/esp32_cam_wireless` repository. Wireless frames use a latest-frame queue and the same YOLO11n runtimes as mobile-camera frames.
+
 ## Real-device YOLO11n benchmark
 
 Install the debug APK on a connected device:
