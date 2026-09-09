@@ -27,7 +27,7 @@ class Yolo11OnnxDetector(
     iouThreshold: Float = 0.45f,
     private val inputSize: Int = 640,
     rgbaTensorWriter: RgbaTensorWriter? = null,
-) : AndroidFrameDetector, YoloBenchmarkDetector {
+) : AndroidFrameDetector, YoloDetector {
     private val environment = OrtEnvironment.getEnvironment()
     private val sessionOptions = OrtSession.SessionOptions().apply {
         setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
@@ -56,15 +56,15 @@ class Yolo11OnnxDetector(
 
     override suspend fun detect(frame: AndroidVideoFrame): List<Detection> =
         if (frame.image.format == PixelFormat.RGBA_8888) {
-            benchmark(frame).detections
+            process(frame).detections
         } else {
-            benchmarkPrepared { preprocess(frame) }.detections
+            processPrepared { preprocess(frame) }.detections
         }
 
-    override suspend fun benchmark(frame: RgbaVideoFrame): YoloBenchmarkSample =
-        benchmarkPrepared { preprocessRgba(frame) }
+    override suspend fun process(frame: RgbaVideoFrame): YoloDetectionResult =
+        processPrepared { preprocessRgba(frame) }
 
-    private suspend fun benchmarkPrepared(prepare: () -> PreparedInput): YoloBenchmarkSample =
+    private suspend fun processPrepared(prepare: () -> PreparedInput): YoloDetectionResult =
         withContext(Dispatchers.Default) {
             val totalStarted = SystemClock.elapsedRealtimeNanos()
 
@@ -89,7 +89,7 @@ class Yolo11OnnxDetector(
                     val output = (it[0] as OnnxTensor).value as Array<Array<FloatArray>>
                     val detections = postprocessor.decode(output[0], prepared.transform)
                     val postprocessMs = postprocessStarted.elapsedMilliseconds()
-                    YoloBenchmarkSample(
+                    YoloDetectionResult(
                         preprocessMs = preprocessMs,
                         inferenceMs = inferenceMs,
                         postprocessMs = postprocessMs,

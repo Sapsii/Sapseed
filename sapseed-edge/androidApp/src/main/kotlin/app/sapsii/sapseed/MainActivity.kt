@@ -10,7 +10,6 @@ import android.util.Log
 import android.widget.GridLayout
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
-import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
@@ -23,16 +22,13 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
-import app.sapsii.sapseed.benchmark.BenchmarkBackend
-import app.sapsii.sapseed.benchmark.BenchmarkReportStore
-import app.sapsii.sapseed.benchmark.DeviceBenchmarkRunner
-import app.sapsii.sapseed.benchmark.detectionSummary
-import app.sapsii.sapseed.benchmark.format
+import app.sapsii.sapseed.inference.InferenceRuntime
+import app.sapsii.sapseed.inference.LiveDetectorFactory
 import app.sapsii.sapseed.edge.android.camera.CameraXFrameSource
 import app.sapsii.sapseed.edge.android.camera.RgbaFrameListener
 import app.sapsii.sapseed.edge.android.camera.RgbaVideoFrame
 import app.sapsii.sapseed.edge.android.camera.WirelessCameraSources
-import app.sapsii.sapseed.edge.android.inference.YoloBenchmarkDetector
+import app.sapsii.sapseed.edge.android.inference.YoloDetector
 import java.util.Locale
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
@@ -55,21 +51,19 @@ class MainActivity : ComponentActivity() {
     private lateinit var tilesGrid: GridLayout
     private lateinit var liveButton: Button
     private lateinit var cameraButton: Button
+    private lateinit var runtimeButton: Button
     private lateinit var status: TextView
-    private lateinit var results: TextView
-    private val benchmarkButtons = mutableListOf<Button>()
     private lateinit var cameraExecutor: ExecutorService
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var benchmarkJob: Job? = null
     private var frameSource: FrameSource? = null
     private var broadcaster: PhoneCameraBroadcaster? = null
     private val wirelessTiles = mutableListOf<WirelessTile>()
     private val connectJobs = mutableListOf<Job>()
     private val discoveredUrls = mutableSetOf<String>()
     private var liveJob: Job? = null
-    private var liveDetector: YoloBenchmarkDetector? = null
+    private var liveDetector: YoloDetector? = null
     private val detectorMutex = Mutex()
-    private var lastProvider = BenchmarkBackend.LITERT_GPU
+    private var selectedRuntime = InferenceRuntime.LITERT_GPU
     private var discovery: Esp32CameraDiscovery? = null
 
     private val permissionRequest = registerForActivityResult(
@@ -101,7 +95,6 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        benchmarkJob?.cancel()
         broadcaster?.close()
         broadcaster = null
         connectJobs.forEach { it.cancel() }
@@ -151,7 +144,6 @@ class MainActivity : ComponentActivity() {
                     if (broadcaster == null) {
                         status.setText(R.string.camera_ready)
                     }
-                    setBenchmarkButtonsEnabled(true)
                 }.onFailure { error ->
                     Log.e(LOG_TAG, "Camera startup failed", error)
                     broadcaster?.close()
@@ -246,14 +238,10 @@ class MainActivity : ComponentActivity() {
                     },
                     onConnectionChanged = { connected, message ->
                         tile.connected = connected
-                        runOnUiThread {
-                            tile.status.text = message
-                            refreshBenchmarkTarget()
-                        }
+                        runOnUiThread { tile.status.text = message }
                     },
                 )
                 tile.source = source
-                frameSource = source
                 runOnUiThread { refreshWirelessUi() }
                 if (liveJob != null) startTileLoop(tile)
             } catch (cancelled: CancellationException) {
@@ -293,33 +281,23 @@ class MainActivity : ComponentActivity() {
     private fun refreshWirelessUi() {
         if (wirelessTiles.isEmpty()) return
         val names = wirelessTiles.joinToString { it.name }
-        val target = wirelessTiles.lastOrNull { it.source != null }
-        status.text = if (target != null) {
-            "${wirelessTiles.size} wireless camera(s): $names · benchmark: ${target.name}"
-        } else {
-            "${wirelessTiles.size} wireless camera(s): $names"
-        }
+        status.text = "${wirelessTiles.size} wireless camera(s): $names"
         cameraButton.text = "${getString(R.string.camera_source_wireless)} (${wirelessTiles.size})"
+        runtimeButton.isEnabled = liveJob == null
         liveButton.isEnabled = true
         liveButton.setText(if (liveJob != null) R.string.live_detect_on else R.string.live_detect_off)
-        refreshBenchmarkTarget()
-    }
-
-    private fun refreshBenchmarkTarget() {
-        val target = wirelessTiles.lastOrNull { it.source != null }
-        frameSource = target?.source
-        setBenchmarkButtonsEnabled(target != null && target.connected && benchmarkJob == null)
     }
 
     private fun setLiveDetect(enabled: Boolean) {
         if (enabled) {
             if (liveJob != null || wirelessTiles.isEmpty()) return
+            runtimeButton.isEnabled = false
             liveButton.isEnabled = false
             liveButton.setText(R.string.live_detect_starting)
-            status.text = getString(R.string.benchmark_loading_model, lastProvider.name)
+            status.text = getString(R.string.live_detect_loading_model, selectedRuntime.displayName)
             liveJob = scope.launch {
                 val detector = try {
-                    DeviceBenchmarkRunner.createDetector(this@MainActivity, lastProvider)
+                    LiveDetectorFactory.create(this@MainActivity, selectedRuntime)
                 } catch (cancelled: CancellationException) {
                     liveJob = null
                     throw cancelled
@@ -339,6 +317,7 @@ class MainActivity : ComponentActivity() {
         } else {
             val job = liveJob ?: return
             liveJob = null
+            runtimeButton.isEnabled = true
             wirelessTiles.forEach {
                 it.detectJob?.cancel()
                 it.detectJob = null
@@ -367,7 +346,7 @@ class MainActivity : ComponentActivity() {
                     frame.release()
                     continue
                 }
-                val sample = detectorMutex.withLock { detector.benchmark(rgba) }
+                val sample = detectorMutex.withLock { detector.process(rgba) }
                 frame.release()
                 count++
                 val now = SystemClock.elapsedRealtime()
@@ -444,7 +423,7 @@ class MainActivity : ComponentActivity() {
         try {
             val url = active.start()
             cameraButton.setText(R.string.camera_source_broadcasting)
-            status.text = "Broadcasting at $url — discoverable on this Wi-Fi"
+            status.text = "Broadcasting at $url, discoverable on this Wi-Fi"
         } catch (error: Throwable) {
             Log.e(LOG_TAG, "Camera broadcast failed", error)
             stopCurrentSource()
@@ -453,8 +432,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun stopCurrentSource() {
-        benchmarkJob?.cancel()
-        benchmarkJob = null
         setLiveDetect(false)
         connectJobs.forEach { it.cancel() }
         connectJobs.clear()
@@ -469,69 +446,18 @@ class MainActivity : ComponentActivity() {
         tilesGrid.removeAllViews()
         frameSource?.close()
         frameSource = null
-        setBenchmarkButtonsEnabled(false)
     }
 
-    private fun startBenchmark(provider: BenchmarkBackend) {
-        val source = frameSource ?: return
-        lastProvider = provider
-        setLiveDetect(false)
-        benchmarkJob?.cancel()
-        setBenchmarkButtonsEnabled(false)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        status.text = getString(R.string.benchmark_loading_model, provider.name)
-        results.text = ""
-
-        benchmarkJob = scope.launch {
-            try {
-                val report = DeviceBenchmarkRunner(this@MainActivity, source).run(
-                    provider = provider,
-                    onSample = { completed, sample ->
-                        status.text = getString(
-                            R.string.benchmark_progress,
-                            provider.name,
-                            completed,
-                            MEASURED_ITERATIONS,
-                        )
-                        results.text = getString(
-                            R.string.benchmark_live_result,
-                            sample.totalMs,
-                            sample.inferenceMs,
-                            sample.detections.size,
-                            sample.detectionSummary(),
-                        )
-                    },
-                    measuredIterations = MEASURED_ITERATIONS,
-                )
-                val directory = BenchmarkReportStore(this@MainActivity).save(report)
-                status.setText(R.string.benchmark_complete)
-                results.text = buildString {
-                    appendLine("Provider: ${report.provider}")
-                    appendLine("Mean total: ${report.meanTotalMs.format()} ms")
-                    appendLine("Median: ${report.medianTotalMs.format()} ms")
-                    appendLine("p95: ${report.p95TotalMs.format()} ms")
-                    appendLine("p99: ${report.p99TotalMs.format()} ms")
-                    appendLine("Mean inference: ${report.meanInferenceMs.format()} ms")
-                    appendLine("Effective FPS: ${report.effectiveFps.format()}")
-                    appendLine("Peak PSS: ${report.peakPssMegabytes.format()} MiB")
-                    appendLine("Thermal: ${report.initialThermalStatus} → ${report.finalThermalStatus}")
-                    appendLine("Saved: ${directory.absolutePath}")
-                }
-                Log.i(LOG_TAG, "Benchmark saved to ${directory.absolutePath}")
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Throwable) {
-                Log.e(LOG_TAG, "Benchmark failed for $provider", error)
-                status.setText(R.string.benchmark_failed)
-                results.text = error.stackTraceToString()
-            } finally {
-                if (benchmarkJob === coroutineContext[Job]) {
-                    benchmarkJob = null
-                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    setBenchmarkButtonsEnabled(frameSource != null)
-                }
+    private fun showRuntimeMenu() {
+        if (liveJob != null) return
+        val runtimes = InferenceRuntime.entries
+        AlertDialog.Builder(this)
+            .setTitle(R.string.runtime_title)
+            .setItems(runtimes.map { it.displayName }.toTypedArray()) { _, which ->
+                selectedRuntime = runtimes[which]
+                runtimeButton.text = getString(R.string.runtime_selected, selectedRuntime.displayName)
             }
-        }
+            .show()
     }
 
     private fun createContentView() = LinearLayout(this).apply {
@@ -554,7 +480,11 @@ class MainActivity : ComponentActivity() {
             textSize = 15f
         }
         addView(status, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-        addView(createBenchmarkButtons(), LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        runtimeButton = Button(context).apply {
+            text = getString(R.string.runtime_selected, selectedRuntime.displayName)
+            setOnClickListener { showRuntimeMenu() }
+        }
+        addView(runtimeButton, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         liveButton = Button(context).apply {
             setText(R.string.live_detect_off)
             isEnabled = false
@@ -564,7 +494,7 @@ class MainActivity : ComponentActivity() {
         preview = PreviewView(context).apply {
             scaleType = PreviewView.ScaleType.FILL_CENTER
         }
-        addView(preview, LinearLayout.LayoutParams(MATCH_PARENT, 0, 3f))
+        addView(preview, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
         tilesScroll = ScrollView(context).apply {
             visibility = android.view.View.GONE
         }
@@ -575,49 +505,7 @@ class MainActivity : ComponentActivity() {
             tilesGrid,
             LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT),
         )
-        addView(tilesScroll, LinearLayout.LayoutParams(MATCH_PARENT, 0, 3f))
-        results = TextView(context).apply {
-            textSize = 14f
-            setTextIsSelectable(true)
-        }
-        addView(
-            ScrollView(context).apply { addView(results) },
-            LinearLayout.LayoutParams(MATCH_PARENT, 0, 2f),
-        )
-    }
-
-    private fun createBenchmarkButtons() = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        addView(
-            createBenchmarkRow(
-                R.string.benchmark_onnx_cpu to BenchmarkBackend.ONNX_CPU,
-                R.string.benchmark_onnx_nnapi to BenchmarkBackend.ONNX_NNAPI,
-            ),
-        )
-        addView(
-            createBenchmarkRow(
-                R.string.benchmark_litert_cpu to BenchmarkBackend.LITERT_CPU,
-                R.string.benchmark_litert_gpu to BenchmarkBackend.LITERT_GPU,
-            ),
-        )
-    }
-
-    private fun createBenchmarkRow(vararg entries: Pair<Int, BenchmarkBackend>) =
-        LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            entries.forEach { (label, backend) ->
-                val button = Button(context).apply {
-                    setText(label)
-                    isEnabled = false
-                    setOnClickListener { startBenchmark(backend) }
-                }
-                benchmarkButtons += button
-                addView(button, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-            }
-        }
-
-    private fun setBenchmarkButtonsEnabled(enabled: Boolean) {
-        benchmarkButtons.forEach { it.isEnabled = enabled }
+        addView(tilesScroll, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
     }
 
     private fun hasCameraPermission(): Boolean =
@@ -645,8 +533,7 @@ class MainActivity : ComponentActivity() {
     )
 
     companion object {
-        private const val LOG_TAG = "SapseedBenchmark"
-        private const val MEASURED_ITERATIONS = 30
+        private const val LOG_TAG = "SapseedApp"
         private const val DISCOVERY_TIMEOUT_MS = 10_000L
         private const val TILE_COLUMNS = 2
         private const val TILE_PREVIEW_HEIGHT_DP = 200

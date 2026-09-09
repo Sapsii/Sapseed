@@ -4,7 +4,7 @@ Local tooling for the model consumed by `sapseed-edge`.
 
 The **dataset preparation and training pipeline is on Kaggle**:
 [`tsaty01/sapseed-model`](https://www.kaggle.com/code/tsaty01/sapseed-model)
-(Apache-2.0) — it merges six public datasets into a single 21-class "smart bus"
+(Apache-2.0). It merges six public datasets into a single 21-class "smart bus"
 detector and fine-tunes YOLO11n. The class taxonomy is in
 `configs/smart-bus.yaml`. This folder only holds the tooling that consumes the
 resulting model: benchmark, evaluate, and export.

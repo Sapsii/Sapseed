@@ -107,7 +107,7 @@ Java_app_sapsii_sapseed_edge_android_camera_H264FrameSource_nativeYuv420ToRgba(
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_app_sapsii_sapseed_benchmark_NativeRgbaTensorWriter_nativeWrite(
+Java_app_sapsii_sapseed_inference_NativeRgbaTensorWriter_nativeWrite(
     JNIEnv* env,
     jobject,
     jobject source_buffer,

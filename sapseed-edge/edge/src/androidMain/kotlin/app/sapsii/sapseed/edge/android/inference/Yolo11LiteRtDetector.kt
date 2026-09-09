@@ -22,7 +22,7 @@ class Yolo11LiteRtDetector private constructor(
     rgbaTensorWriter: RgbaTensorWriter?,
     private val gpuSerializationDirectory: String?,
     private val gpuModelToken: String,
-) : AndroidFrameDetector, YoloBenchmarkDetector {
+) : AndroidFrameDetector, YoloDetector {
     private val inferenceDispatcher = Executors.newSingleThreadExecutor { task ->
         Thread(task, "Sapseed-LiteRT-${executionProvider.name}").apply { priority = Thread.MAX_PRIORITY }
     }.asCoroutineDispatcher()
@@ -35,9 +35,9 @@ class Yolo11LiteRtDetector private constructor(
     private val output = Array(1) { Array(YOLO_CHANNELS) { FloatArray(YOLO_ANCHORS) } }
     private var interpreter: Interpreter? = null
 
-    override suspend fun detect(frame: AndroidVideoFrame): List<Detection> = benchmark(frame).detections
+    override suspend fun detect(frame: AndroidVideoFrame): List<Detection> = process(frame).detections
 
-    override suspend fun benchmark(frame: RgbaVideoFrame): YoloBenchmarkSample = withContext(inferenceDispatcher) {
+    override suspend fun process(frame: RgbaVideoFrame): YoloDetectionResult = withContext(inferenceDispatcher) {
         val runtime = checkNotNull(interpreter) { "LiteRT detector is not initialized" }
         val totalStarted = SystemClock.elapsedRealtimeNanos()
 
@@ -53,7 +53,7 @@ class Yolo11LiteRtDetector private constructor(
         val detections = postprocessor.decode(output[0], transform)
         val postprocessMs = postprocessStarted.elapsedMilliseconds()
 
-        YoloBenchmarkSample(
+        YoloDetectionResult(
             preprocessMs = preprocessMs,
             inferenceMs = inferenceMs,
             postprocessMs = postprocessMs,

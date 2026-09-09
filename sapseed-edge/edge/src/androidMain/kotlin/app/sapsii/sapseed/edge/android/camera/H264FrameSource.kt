@@ -20,7 +20,7 @@ import kotlinx.coroutines.channels.Channel
 
 /**
  * Reads a raw H.264 Annex-B stream over HTTP (Content-Type: video/h264), decodes it
- * with MediaCodec, and keeps only the newest frame — the H.264 counterpart to
+ * with MediaCodec, and keeps only the newest frame as the H.264 counterpart to
  * [MjpegFrameSource]. The decoded YUV output is converted to the same R, G, B, A
  * byte layout CameraX produces, so wireless H.264 frames flow through
  * the same runtimes as mobile-camera frames.
