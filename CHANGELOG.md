@@ -1,3 +1,9 @@
+## [1.0.0-dev.2](https://github.com/Sapsii/Sapseed/compare/v1.0.0-dev.1...v1.0.0-dev.2) (2026-09-09)
+
+### Bug Fixes
+
+* **release:** attach signed arm64 APK ([b8fb174](https://github.com/Sapsii/Sapseed/commit/b8fb1742511c2ce98ed3ae2b47468a60a5bdfc61))
+
 ## 1.0.0-dev.1 (2026-09-09)
 
 ### Bug Fixes
