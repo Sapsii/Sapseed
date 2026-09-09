@@ -39,6 +39,12 @@
       { "changelogFile": "CHANGELOG.md" }
     ],
     [
+      "@semantic-release/exec",
+      {
+        "prepareCmd": "bash .github/scripts/prepare-release.sh ${nextRelease.version}"
+      }
+    ],
+    [
       "@semantic-release/git",
       {
         "assets": ["CHANGELOG.md"],
@@ -47,7 +53,15 @@
     ],
     [
       "@semantic-release/github",
-      { "successComment": false }
+      {
+        "assets": [
+          {
+            "path": "dist/*-arm64-v8a.apk",
+            "label": "Sapseed Android arm64-v8a"
+          }
+        ],
+        "successComment": false
+      }
     ],
     [
       "@cleyrop-org/semantic-release-backmerge",

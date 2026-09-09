@@ -25,7 +25,20 @@ Dataset preparation and model training run on [Kaggle](https://www.kaggle.com/co
 ```shell
 cd sapseed-models
 uv sync --extra dev --extra export
-uv run python scripts/export.py --model path/to/best.pt --format litert --precision fp32
+uv run python scripts/deploy_android.py --archive path/to/_output_.zip
 ```
 
 See [`sapseed-models/README.md`](sapseed-models/README.md).
+
+## Releases
+
+Semantic-release publishes prereleases from `dev` and stable releases from `main`. Each release
+includes a signed `arm64-v8a` release APK. GitHub Actions requires these repository secrets:
+
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+The keystore secret is the base64 encoding of the release keystore file. Keep the original
+keystore and passwords backed up because future APK updates must use the same signing key.
