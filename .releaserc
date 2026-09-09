@@ -54,12 +54,7 @@
     [
       "@semantic-release/github",
       {
-        "assets": [
-          {
-            "path": "dist/*-arm64-v8a.apk",
-            "label": "Sapseed Android arm64-v8a"
-          }
-        ],
+        "assets": ["dist/*-arm64-v8a.apk"],
         "successComment": false
       }
     ],
