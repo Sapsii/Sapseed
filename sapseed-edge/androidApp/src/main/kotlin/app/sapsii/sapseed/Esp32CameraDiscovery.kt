@@ -3,6 +3,7 @@ package app.sapsii.sapseed
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.util.Log
 
 class Esp32CameraDiscovery(
     context: Context,
@@ -27,17 +28,27 @@ class Esp32CameraDiscovery(
         }
 
         override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-            if (!serviceInfo.serviceType.startsWith(SERVICE_TYPE)) return
+            Log.i(LOG_TAG, "NSD found name=${serviceInfo.serviceName} type=${serviceInfo.serviceType}")
+            if (!isSapseedCamera(serviceInfo)) return
             @Suppress("DEPRECATION")
             manager.resolveService(
                 serviceInfo,
                 object : NsdManager.ResolveListener {
-                    override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = Unit
+                    override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                        Log.w(LOG_TAG, "NSD resolve failed for ${serviceInfo.serviceName} ($errorCode)")
+                    }
 
                     override fun onServiceResolved(resolved: NsdServiceInfo) {
                         @Suppress("DEPRECATION")
-                        val host = resolved.host?.hostAddress ?: return
-                        val url = "http://$host:${resolved.port}/stream"
+                        val host = resolved.host?.hostAddress ?: run {
+                            Log.w(LOG_TAG, "NSD resolved ${resolved.serviceName} with no host")
+                            return
+                        }
+                        val path = resolved.attributes?.get("stream")
+                            ?.let { String(it, Charsets.UTF_8) }
+                            ?: "/stream"
+                        val url = "http://$host:${resolved.port}$path"
+                        Log.i(LOG_TAG, "NSD resolved ${resolved.serviceName} -> $url")
                         onCameraFound(resolved.serviceName, url)
                     }
                 },
@@ -48,6 +59,7 @@ class Esp32CameraDiscovery(
     fun start() {
         if (running) return
         running = true
+        Log.i(LOG_TAG, "NSD browsing for $SERVICE_TYPE")
         manager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
     }
 
@@ -57,7 +69,13 @@ class Esp32CameraDiscovery(
         running = false
     }
 
+    private fun isSapseedCamera(serviceInfo: NsdServiceInfo): Boolean {
+        val advertised = serviceInfo.serviceType.trim().trimEnd('.')
+        return advertised.equals(SERVICE_TYPE.trimEnd('.'), ignoreCase = true)
+    }
+
     private companion object {
         const val SERVICE_TYPE = "_sapseedcam._tcp."
+        const val LOG_TAG = "SapseedNsd"
     }
 }

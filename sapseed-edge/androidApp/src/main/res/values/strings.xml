@@ -16,6 +16,11 @@
     <string name="camera_manual_title">Connect wireless camera</string>
     <string name="camera_ip_hint">192.168.4.1 or http://IP/stream</string>
     <string name="camera_connect">Connect</string>
+    <string name="camera_source_broadcast">Broadcast this phone\'s camera</string>
+    <string name="camera_source_broadcasting">Camera: Broadcasting</string>
+    <string name="live_detect_off">Live detect: OFF</string>
+    <string name="live_detect_on">Live detect: ON</string>
+    <string name="live_detect_starting">Live detect: …</string>
     <string name="camera_connecting">Connecting to wireless camera…</string>
     <string name="benchmark_onnx_cpu">ONNX CPU</string>
     <string name="benchmark_onnx_nnapi">ONNX NNAPI</string>

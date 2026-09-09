@@ -42,44 +42,8 @@ class DeviceBenchmarkRunner(
         require(warmupIterations >= 0)
         require(measuredIterations > 0)
 
-        val model = withContext(Dispatchers.IO) {
-            context.assets.open(provider.modelAsset).use { it.readBytes() }
-        }
-        val tensorWriter = NativeRgbaTensorWriter()
-        val gpuSerializationDirectory = context.codeCacheDir.resolve("litert-gpu").apply {
-            check(mkdirs() || isDirectory) { "Could not create LiteRT GPU cache directory" }
-        }
         val sessionStarted = SystemClock.elapsedRealtimeNanos()
-        val detector: YoloBenchmarkDetector = when (provider) {
-            BenchmarkBackend.ONNX_CPU -> withContext(Dispatchers.Default) {
-                Yolo11OnnxDetector(
-                    model,
-                    OnnxExecutionProvider.CPU,
-                    rgbaTensorWriter = tensorWriter,
-                )
-            }
-
-            BenchmarkBackend.ONNX_NNAPI -> withContext(Dispatchers.Default) {
-                Yolo11OnnxDetector(
-                    model,
-                    OnnxExecutionProvider.NNAPI,
-                    rgbaTensorWriter = tensorWriter,
-                )
-            }
-
-            BenchmarkBackend.LITERT_CPU -> Yolo11LiteRtDetector.create(
-                model,
-                LiteRtExecutionProvider.CPU,
-                rgbaTensorWriter = tensorWriter,
-            )
-
-            BenchmarkBackend.LITERT_GPU -> Yolo11LiteRtDetector.create(
-                model,
-                LiteRtExecutionProvider.GPU,
-                rgbaTensorWriter = tensorWriter,
-                gpuSerializationDirectory = gpuSerializationDirectory.absolutePath,
-            )
-        }
+        val detector = createDetector(context, provider)
         val sessionInitializationMs = sessionStarted.elapsedMilliseconds()
         val powerManager = context.getSystemService(PowerManager::class.java)
         val initialThermalStatus = powerManager.currentThermalStatusCompat()
@@ -152,6 +116,47 @@ class DeviceBenchmarkRunner(
 
     companion object {
         private const val LOG_TAG = "SapseedBenchmark"
+
+        /** Loads the model and builds a detector without running any frames. Shared by benchmark runs and live multi-camera detection. */
+        suspend fun createDetector(context: Context, provider: BenchmarkBackend): YoloBenchmarkDetector {
+            val model = withContext(Dispatchers.IO) {
+                context.assets.open(provider.modelAsset).use { it.readBytes() }
+            }
+            val tensorWriter = NativeRgbaTensorWriter()
+            val gpuSerializationDirectory = context.codeCacheDir.resolve("litert-gpu").apply {
+                check(mkdirs() || isDirectory) { "Could not create LiteRT GPU cache directory" }
+            }
+            return when (provider) {
+                BenchmarkBackend.ONNX_CPU -> withContext(Dispatchers.Default) {
+                    Yolo11OnnxDetector(
+                        model,
+                        OnnxExecutionProvider.CPU,
+                        rgbaTensorWriter = tensorWriter,
+                    )
+                }
+
+                BenchmarkBackend.ONNX_NNAPI -> withContext(Dispatchers.Default) {
+                    Yolo11OnnxDetector(
+                        model,
+                        OnnxExecutionProvider.NNAPI,
+                        rgbaTensorWriter = tensorWriter,
+                    )
+                }
+
+                BenchmarkBackend.LITERT_CPU -> Yolo11LiteRtDetector.create(
+                    model,
+                    LiteRtExecutionProvider.CPU,
+                    rgbaTensorWriter = tensorWriter,
+                )
+
+                BenchmarkBackend.LITERT_GPU -> Yolo11LiteRtDetector.create(
+                    model,
+                    LiteRtExecutionProvider.GPU,
+                    rgbaTensorWriter = tensorWriter,
+                    gpuSerializationDirectory = gpuSerializationDirectory.absolutePath,
+                )
+            }
+        }
     }
 }
 

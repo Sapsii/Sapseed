@@ -3,9 +3,11 @@ package app.sapsii.sapseed
 import android.Manifest
 import android.app.AlertDialog
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
 import android.os.Bundle
+import android.util.Size
+import android.os.SystemClock
 import android.util.Log
+import android.widget.GridLayout
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.WindowManager
@@ -27,7 +29,14 @@ import app.sapsii.sapseed.benchmark.DeviceBenchmarkRunner
 import app.sapsii.sapseed.benchmark.detectionSummary
 import app.sapsii.sapseed.benchmark.format
 import app.sapsii.sapseed.edge.android.camera.CameraXFrameSource
-import app.sapsii.sapseed.edge.android.camera.MjpegFrameSource
+import app.sapsii.sapseed.edge.android.camera.RgbaFrameListener
+import app.sapsii.sapseed.edge.android.camera.RgbaVideoFrame
+import app.sapsii.sapseed.edge.android.camera.WirelessCameraSources
+import app.sapsii.sapseed.edge.android.inference.YoloBenchmarkDetector
+import java.util.Locale
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import app.sapsii.sapseed.edge.contract.FrameSource
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -42,7 +51,9 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var preview: PreviewView
-    private lateinit var wirelessPreview: ImageView
+    private lateinit var tilesScroll: ScrollView
+    private lateinit var tilesGrid: GridLayout
+    private lateinit var liveButton: Button
     private lateinit var cameraButton: Button
     private lateinit var status: TextView
     private lateinit var results: TextView
@@ -51,6 +62,14 @@ class MainActivity : ComponentActivity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var benchmarkJob: Job? = null
     private var frameSource: FrameSource? = null
+    private var broadcaster: PhoneCameraBroadcaster? = null
+    private val wirelessTiles = mutableListOf<WirelessTile>()
+    private val connectJobs = mutableListOf<Job>()
+    private val discoveredUrls = mutableSetOf<String>()
+    private var liveJob: Job? = null
+    private var liveDetector: YoloBenchmarkDetector? = null
+    private val detectorMutex = Mutex()
+    private var lastProvider = BenchmarkBackend.LITERT_GPU
     private var discovery: Esp32CameraDiscovery? = null
 
     private val permissionRequest = registerForActivityResult(
@@ -83,6 +102,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         benchmarkJob?.cancel()
+        broadcaster?.close()
+        broadcaster = null
+        connectJobs.forEach { it.cancel() }
+        liveJob?.cancel()
+        wirelessTiles.forEach { it.source?.close() }
+        runCatching { liveDetector?.close() }
+        liveDetector = null
         discovery?.close()
         scope.cancel()
         frameSource?.close()
@@ -90,15 +116,21 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private fun startMobileCamera() {
+    private fun startMobileCamera(
+        frameListener: RgbaFrameListener? = null,
+        stopFirst: Boolean = true,
+        broadcastSession: Boolean = false,
+    ) {
         if (!hasCameraPermission()) {
             permissionRequest.launch(arrayOf(Manifest.permission.CAMERA))
             return
         }
-        stopCurrentSource()
+        if (stopFirst) stopCurrentSource()
         cameraButton.setText(R.string.camera_source_mobile)
         preview.visibility = android.view.View.VISIBLE
-        wirelessPreview.visibility = android.view.View.GONE
+        tilesScroll.visibility = android.view.View.GONE
+        liveButton.isEnabled = false
+        liveButton.setText(R.string.live_detect_off)
         status.setText(R.string.starting_camera)
         val providerFuture = ProcessCameraProvider.getInstance(this)
         providerFuture.addListener(
@@ -110,14 +142,20 @@ class MainActivity : ComponentActivity() {
                         analyzerExecutor = cameraExecutor,
                         previewSurfaceProvider = preview.surfaceProvider,
                         outputImageFormat = ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888,
-                        outputImageRotationEnabled = true,
+                        outputImageRotationEnabled = !broadcastSession,
+                        frameListener = frameListener,
+                        targetResolution = if (broadcastSession) BROADCAST_RESOLUTION else null,
                     )
                 }.onSuccess { source ->
                     frameSource = source
-                    status.setText(R.string.camera_ready)
+                    if (broadcaster == null) {
+                        status.setText(R.string.camera_ready)
+                    }
                     setBenchmarkButtonsEnabled(true)
                 }.onFailure { error ->
                     Log.e(LOG_TAG, "Camera startup failed", error)
+                    broadcaster?.close()
+                    broadcaster = null
                     status.setText(R.string.camera_failed)
                 }
             },
@@ -133,12 +171,14 @@ class MainActivity : ComponentActivity() {
                     getString(R.string.camera_source_mobile),
                     getString(R.string.camera_source_discover),
                     getString(R.string.camera_source_manual),
+                    getString(R.string.camera_source_broadcast),
                 ),
             ) { _, which ->
                 when (which) {
                     0 -> startMobileCamera()
                     1 -> discoverWirelessCamera()
                     2 -> showManualCameraDialog()
+                    3 -> startBroadcast()
                 }
             }
             .show()
@@ -146,14 +186,13 @@ class MainActivity : ComponentActivity() {
 
     private fun discoverWirelessCamera() {
         discovery?.close()
+        discoveredUrls.clear()
         status.setText(R.string.camera_discovering)
         val activeDiscovery = Esp32CameraDiscovery(
             context = this,
             onCameraFound = { name, url ->
                 runOnUiThread {
-                    if (discovery !== null) {
-                        discovery?.close()
-                        discovery = null
+                    if (discovery !== null && discoveredUrls.add(url)) {
                         connectWirelessCamera(url, name)
                     }
                 }
@@ -167,7 +206,9 @@ class MainActivity : ComponentActivity() {
             if (discovery === activeDiscovery) {
                 activeDiscovery.close()
                 discovery = null
-                status.setText(R.string.camera_discovery_timeout)
+                if (wirelessTiles.isEmpty()) {
+                    status.setText(R.string.camera_discovery_timeout)
+                }
             }
         }
     }
@@ -188,39 +229,244 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun connectWirelessCamera(address: String, displayName: String) {
-        stopCurrentSource()
         preview.visibility = android.view.View.GONE
-        wirelessPreview.visibility = android.view.View.VISIBLE
-        wirelessPreview.setImageDrawable(null)
-        cameraButton.text = displayName
-        status.setText(R.string.camera_connecting)
+        tilesScroll.visibility = android.view.View.VISIBLE
+        val views = createTileViews(displayName)
+        val tile = WirelessTile(displayName, views.root, views.preview, views.status)
+        views.remove.setOnClickListener { removeTile(tile) }
+        wirelessTiles += tile
+        refreshWirelessUi()
 
-        runCatching {
-            MjpegFrameSource(
-                streamUrl = address,
-                onPreviewFrame = ::showWirelessPreview,
-                onConnectionChanged = { connected, message ->
-                    runOnUiThread {
-                        status.text = message
-                        setBenchmarkButtonsEnabled(connected && frameSource != null)
-                    }
-                },
-            )
-        }.onSuccess { source ->
-            frameSource = source
-        }.onFailure { error ->
-            status.text = error.message ?: getString(R.string.camera_failed)
-            setBenchmarkButtonsEnabled(false)
+        val job = scope.launch {
+            try {
+                val source = WirelessCameraSources.connect(
+                    address = address,
+                    onPreviewFrame = { bitmap ->
+                        tile.preview.post { tile.preview.setImageBitmap(bitmap) }
+                    },
+                    onConnectionChanged = { connected, message ->
+                        tile.connected = connected
+                        runOnUiThread {
+                            tile.status.text = message
+                            refreshBenchmarkTarget()
+                        }
+                    },
+                )
+                tile.source = source
+                frameSource = source
+                runOnUiThread { refreshWirelessUi() }
+                if (liveJob != null) startTileLoop(tile)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                Log.e(LOG_TAG, "Wireless camera connect failed", error)
+                val wasLast = wirelessTiles.size == 1
+                runOnUiThread {
+                    removeTile(tile)
+                    if (wasLast) status.text = error.message ?: getString(R.string.camera_failed)
+                }
+            } finally {
+                connectJobs.removeAll { it === tile.connectJob }
+                tile.connectJob = null
+            }
+        }
+        tile.connectJob = job
+        connectJobs += job
+    }
+
+    private fun removeTile(tile: WirelessTile) {
+        tile.connectJob?.cancel()
+        tile.connectJob = null
+        tile.detectJob?.cancel()
+        tile.detectJob = null
+        tile.source?.close()
+        tile.source = null
+        wirelessTiles.remove(tile)
+        tilesGrid.removeView(tile.root)
+        if (wirelessTiles.isEmpty()) {
+            startMobileCamera()
+        } else {
+            refreshWirelessUi()
         }
     }
 
-    private fun showWirelessPreview(bitmap: Bitmap) {
-        wirelessPreview.post { wirelessPreview.setImageBitmap(bitmap) }
+    private fun refreshWirelessUi() {
+        if (wirelessTiles.isEmpty()) return
+        val names = wirelessTiles.joinToString { it.name }
+        val target = wirelessTiles.lastOrNull { it.source != null }
+        status.text = if (target != null) {
+            "${wirelessTiles.size} wireless camera(s): $names · benchmark: ${target.name}"
+        } else {
+            "${wirelessTiles.size} wireless camera(s): $names"
+        }
+        cameraButton.text = "${getString(R.string.camera_source_wireless)} (${wirelessTiles.size})"
+        liveButton.isEnabled = true
+        liveButton.setText(if (liveJob != null) R.string.live_detect_on else R.string.live_detect_off)
+        refreshBenchmarkTarget()
+    }
+
+    private fun refreshBenchmarkTarget() {
+        val target = wirelessTiles.lastOrNull { it.source != null }
+        frameSource = target?.source
+        setBenchmarkButtonsEnabled(target != null && target.connected && benchmarkJob == null)
+    }
+
+    private fun setLiveDetect(enabled: Boolean) {
+        if (enabled) {
+            if (liveJob != null || wirelessTiles.isEmpty()) return
+            liveButton.isEnabled = false
+            liveButton.setText(R.string.live_detect_starting)
+            status.text = getString(R.string.benchmark_loading_model, lastProvider.name)
+            liveJob = scope.launch {
+                val detector = try {
+                    DeviceBenchmarkRunner.createDetector(this@MainActivity, lastProvider)
+                } catch (cancelled: CancellationException) {
+                    liveJob = null
+                    throw cancelled
+                } catch (error: Throwable) {
+                    Log.e(LOG_TAG, "Live detect unavailable", error)
+                    liveJob = null
+                    runOnUiThread {
+                        status.text = error.message ?: getString(R.string.camera_failed)
+                        refreshWirelessUi()
+                    }
+                    return@launch
+                }
+                liveDetector = detector
+                wirelessTiles.forEach { startTileLoop(it) }
+                runOnUiThread { refreshWirelessUi() }
+            }
+        } else {
+            val job = liveJob ?: return
+            liveJob = null
+            wirelessTiles.forEach {
+                it.detectJob?.cancel()
+                it.detectJob = null
+            }
+            val detector = liveDetector
+            liveDetector = null
+            job.cancel()
+            refreshWirelessUi()
+            if (detector != null) {
+                scope.launch(Dispatchers.Default) { runCatching { detector.close() } }
+            }
+        }
+    }
+
+    private fun startTileLoop(tile: WirelessTile) {
+        val detector = liveDetector ?: return
+        if (tile.detectJob?.isActive == true) return
+        if (tile.source == null) return
+        tile.detectJob = scope.launch(Dispatchers.Default) {
+            var count = 0
+            var windowStart = SystemClock.elapsedRealtime()
+            while (isActive) {
+                val frame = tile.source?.nextFrame() ?: break
+                val rgba = frame as? RgbaVideoFrame
+                if (rgba == null) {
+                    frame.release()
+                    continue
+                }
+                val sample = detectorMutex.withLock { detector.benchmark(rgba) }
+                frame.release()
+                count++
+                val now = SystemClock.elapsedRealtime()
+                if (now - tile.lastUiUpdate >= UI_UPDATE_INTERVAL_MS) {
+                    val fps = count * 1000.0 / (now - windowStart).coerceAtLeast(1)
+                    count = 0
+                    windowStart = now
+                    tile.lastUiUpdate = now
+                    val summary = sample.detections.sortedByDescending { it.confidence }.take(3)
+                        .joinToString(" ") { detection ->
+                            "${detection.label}:${"%.2f".format(Locale.US, detection.confidence)}"
+                        }.ifEmpty { "no objects" }
+                    val line = "${"%.1f".format(Locale.US, fps)} fps · " +
+                        "${"%.0f".format(Locale.US, sample.totalMs)} ms · $summary"
+                    runOnUiThread { tile.status.text = line }
+                }
+            }
+        }
+    }
+
+    private fun createTileViews(name: String): TileViews {
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val title = TextView(this).apply {
+            text = name
+            textSize = 14f
+            layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)
+        }
+        val remove = Button(this).apply {
+            text = "✕"
+            textSize = 12f
+            minimumWidth = 0
+        }
+        header.addView(title)
+        header.addView(remove, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
+        val preview = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, dp(TILE_PREVIEW_HEIGHT_DP))
+        }
+        val status = TextView(this).apply {
+            textSize = 12f
+            setText(R.string.camera_connecting)
+        }
+        root.addView(header, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        root.addView(preview)
+        root.addView(status, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        tilesGrid.addView(
+            root,
+            GridLayout.LayoutParams(
+                GridLayout.spec(GridLayout.UNDEFINED, GridLayout.FILL, 1f),
+                GridLayout.spec(GridLayout.UNDEFINED, GridLayout.FILL, 1f),
+            ).apply { width = 0 },
+        )
+        return TileViews(root, preview, status, remove)
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private fun startBroadcast() {
+        stopCurrentSource()
+        if (!hasCameraPermission()) {
+            permissionRequest.launch(arrayOf(Manifest.permission.CAMERA))
+            return
+        }
+        preview.visibility = android.view.View.VISIBLE
+        tilesScroll.visibility = android.view.View.GONE
+        val active = PhoneCameraBroadcaster(this) { message ->
+            runOnUiThread { status.text = message }
+        }
+        broadcaster = active
+        // No extra stop here: startBroadcast already stopped, and another
+        // stopCurrentSource would close `active` before it starts.
+        startMobileCamera(active.frameListener, stopFirst = false, broadcastSession = true)
+        try {
+            val url = active.start()
+            cameraButton.setText(R.string.camera_source_broadcasting)
+            status.text = "Broadcasting at $url — discoverable on this Wi-Fi"
+        } catch (error: Throwable) {
+            Log.e(LOG_TAG, "Camera broadcast failed", error)
+            stopCurrentSource()
+            status.text = error.message ?: getString(R.string.camera_failed)
+        }
     }
 
     private fun stopCurrentSource() {
         benchmarkJob?.cancel()
         benchmarkJob = null
+        setLiveDetect(false)
+        connectJobs.forEach { it.cancel() }
+        connectJobs.clear()
+        broadcaster?.close()
+        broadcaster = null
+        wirelessTiles.forEach {
+            it.connectJob?.cancel()
+            it.detectJob?.cancel()
+            it.source?.close()
+        }
+        wirelessTiles.clear()
+        tilesGrid.removeAllViews()
         frameSource?.close()
         frameSource = null
         setBenchmarkButtonsEnabled(false)
@@ -228,6 +474,8 @@ class MainActivity : ComponentActivity() {
 
     private fun startBenchmark(provider: BenchmarkBackend) {
         val source = frameSource ?: return
+        lastProvider = provider
+        setLiveDetect(false)
         benchmarkJob?.cancel()
         setBenchmarkButtonsEnabled(false)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -307,15 +555,27 @@ class MainActivity : ComponentActivity() {
         }
         addView(status, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         addView(createBenchmarkButtons(), LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        liveButton = Button(context).apply {
+            setText(R.string.live_detect_off)
+            isEnabled = false
+            setOnClickListener { setLiveDetect(liveJob == null) }
+        }
+        addView(liveButton, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         preview = PreviewView(context).apply {
             scaleType = PreviewView.ScaleType.FILL_CENTER
         }
         addView(preview, LinearLayout.LayoutParams(MATCH_PARENT, 0, 3f))
-        wirelessPreview = ImageView(context).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
+        tilesScroll = ScrollView(context).apply {
             visibility = android.view.View.GONE
         }
-        addView(wirelessPreview, LinearLayout.LayoutParams(MATCH_PARENT, 0, 3f))
+        tilesGrid = GridLayout(context).apply {
+            columnCount = TILE_COLUMNS
+        }
+        tilesScroll.addView(
+            tilesGrid,
+            LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT),
+        )
+        addView(tilesScroll, LinearLayout.LayoutParams(MATCH_PARENT, 0, 3f))
         results = TextView(context).apply {
             textSize = 14f
             setTextIsSelectable(true)
@@ -364,9 +624,33 @@ class MainActivity : ComponentActivity() {
         ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
                 PackageManager.PERMISSION_GRANTED
 
+    private class WirelessTile(
+        val name: String,
+        val root: LinearLayout,
+        val preview: ImageView,
+        val status: TextView,
+    ) {
+        var source: FrameSource? = null
+        var connected: Boolean = false
+        var connectJob: Job? = null
+        var detectJob: Job? = null
+        var lastUiUpdate: Long = 0L
+    }
+
+    private data class TileViews(
+        val root: LinearLayout,
+        val preview: ImageView,
+        val status: TextView,
+        val remove: Button,
+    )
+
     companion object {
         private const val LOG_TAG = "SapseedBenchmark"
         private const val MEASURED_ITERATIONS = 30
         private const val DISCOVERY_TIMEOUT_MS = 10_000L
+        private const val TILE_COLUMNS = 2
+        private const val TILE_PREVIEW_HEIGHT_DP = 200
+        private const val UI_UPDATE_INTERVAL_MS = 500L
+        private val BROADCAST_RESOLUTION = Size(640, 480)
     }
 }

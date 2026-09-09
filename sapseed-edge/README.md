@@ -33,10 +33,19 @@ The app requests camera/location permission, displays a live CameraX preview, an
 The phone camera remains the default. Tap **Camera: Mobile** at the top of the app to switch sources:
 
 - **Discover wireless camera** finds ESP32-CAM firmware advertising `_sapseedcam._tcp` on the current local network.
-- **Enter camera IP or URL** accepts an IP such as `192.168.4.1` or a complete MJPEG URL such as `http://192.168.4.1/stream`.
+- **Enter camera IP or URL** accepts an IP such as `192.168.4.1`, a complete MJPEG URL such as `http://192.168.4.1/stream`, or a raw H.264 URL such as `https://172.16.211.144:4444/video/h264`.
+- **Broadcast this phone's camera** turns the phone into a discoverable IP camera. Discovery selects its hardware-encoded Annex-B H.264 stream (`/video/h264`, 640×480, about 25 fps on the prototype phones); MJPEG remains available at `/stream` as a fallback. Another edge unit on the same Wi-Fi connects through **Discover wireless camera** with no URL entry.
 - **Camera: Mobile** switches back to CameraX.
 
 For the companion AI-Thinker firmware, flashing instructions, and direct-AP workflow, see the `SapsiiHardware/esp32_cam_wireless` repository. Wireless frames use a latest-frame queue and the same YOLO11n runtimes as mobile-camera frames.
+
+Manual URLs are probed before connecting: `multipart/*` streams use the MJPEG reader, `video/h264` streams are decoded on-device with MediaCodec (Annex-B NAL units, SPS-derived resolution, YUV-to-RGBA conversion). Self-signed HTTPS cameras are accepted, and a plain-HTTP URL whose server answers with silence is automatically retried over HTTPS — both behaviors are scoped to these explicit camera connections only.
+
+## Multi-camera prototype: one edge unit, many feeds
+
+Each **Discover** hit or manual URL **adds** a tile to a two-column grid instead of replacing the current source, so one phone processes several footages simultaneously. Tiles show the live preview plus per-camera status; ✕ drops a tile, and dropping the last one returns to the mobile camera. Discovery keeps collecting until its 10 s timeout, so one scan picks up every broadcasting phone at once.
+
+**Live detect** runs a single shared YOLO11n detector across all tiles (frames serialized with a mutex, latest-frame-per-camera, per-tile fps/ms/object line). It uses the last benchmark backend tapped, defaulting to LiteRT GPU. The four benchmark buttons still run finite measured runs, targeting the newest tile.
 
 ## Real-device YOLO11n benchmark
 
