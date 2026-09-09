@@ -1,13 +1,13 @@
 package app.sapsii.sapseed.edge.android.inference
 
-import app.sapsii.sapseed.edge.android.camera.AndroidVideoFrame
+import app.sapsii.sapseed.edge.android.camera.RgbaVideoFrame
 import app.sapsii.sapseed.edge.model.Detection
 
-interface YoloBenchmarkDetector : AutoCloseable {
-    suspend fun benchmark(frame: AndroidVideoFrame): YoloBenchmarkSample
+interface YoloDetector : AutoCloseable {
+    suspend fun process(frame: RgbaVideoFrame): YoloDetectionResult
 }
 
-data class YoloBenchmarkSample(
+data class YoloDetectionResult(
     val preprocessMs: Double,
     val inferenceMs: Double,
     val postprocessMs: Double,

@@ -1,4 +1,4 @@
-package app.sapsii.sapseed.benchmark
+package app.sapsii.sapseed.inference
 
 import app.sapsii.sapseed.edge.android.inference.RgbaTensorWriter
 import java.nio.ByteBuffer

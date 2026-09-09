@@ -1,0 +1,33 @@
+name: Test
+
+on:
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Compile Python scripts
+        run: python -m compileall -q sapseed-models/scripts
+
+      - name: Build and test Android
+        working-directory: sapseed-edge
+        run: ./gradlew :edge:testAndroidHostTest :androidApp:assembleDebug --console=plain

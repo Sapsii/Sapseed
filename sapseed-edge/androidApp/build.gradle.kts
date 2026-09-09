@@ -18,6 +18,21 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
 }
 
+val releaseKeystorePath = providers.environmentVariable("ANDROID_KEYSTORE_PATH").orNull
+val releaseKeystorePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").orNull
+val releaseSigningValues = listOf(
+    releaseKeystorePath,
+    releaseKeystorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+)
+val releaseSigningConfigured = releaseSigningValues.all { !it.isNullOrBlank() }
+check(releaseSigningValues.none { !it.isNullOrBlank() } || releaseSigningConfigured) {
+    "Android release signing requires all ANDROID_KEYSTORE_* and ANDROID_KEY_* variables"
+}
+
 android {
     namespace = "app.sapsii.sapseed"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
@@ -26,11 +41,29 @@ android {
         applicationId = "app.sapsii.sapseed"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = providers.environmentVariable("SAPSEED_VERSION_CODE").orElse("1").get().toInt()
+        versionName = providers.environmentVariable("SAPSEED_VERSION_NAME").orElse("1.0").get()
 
         ndk {
             abiFilters += "arm64-v8a"
+        }
+    }
+
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(checkNotNull(releaseKeystorePath))
+                storePassword = checkNotNull(releaseKeystorePassword)
+                keyAlias = checkNotNull(releaseKeyAlias)
+                keyPassword = checkNotNull(releaseKeyPassword)
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            isDebuggable = false
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 
