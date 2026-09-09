@@ -22,6 +22,7 @@ import kotlinx.coroutines.withContext
 
 class Yolo11OnnxDetector(
     model: ByteArray,
+    labels: List<String>,
     val executionProvider: OnnxExecutionProvider = OnnxExecutionProvider.CPU,
     confidenceThreshold: Float = 0.25f,
     iouThreshold: Float = 0.45f,
@@ -41,7 +42,7 @@ class Yolo11OnnxDetector(
     }
     private val session = environment.createSession(model, sessionOptions)
     private val inputName = session.inputNames.single()
-    private val postprocessor = Yolo11Postprocessor(confidenceThreshold, iouThreshold)
+    private val postprocessor = Yolo11Postprocessor(labels, confidenceThreshold, iouThreshold)
     private val rgbaPreprocessor = Yolo11RgbaPreprocessor(
         inputSize,
         TensorLayout.NCHW,

@@ -15,6 +15,7 @@ import org.tensorflow.lite.gpu.GpuDelegateFactory
 
 class Yolo11LiteRtDetector private constructor(
     private val model: ByteArray,
+    private val labels: List<String>,
     val executionProvider: LiteRtExecutionProvider,
     confidenceThreshold: Float,
     iouThreshold: Float,
@@ -31,8 +32,8 @@ class Yolo11LiteRtDetector private constructor(
         TensorLayout.NHWC,
         rgbaTensorWriter,
     )
-    private val postprocessor = Yolo11Postprocessor(confidenceThreshold, iouThreshold)
-    private val output = Array(1) { Array(YOLO_CHANNELS) { FloatArray(YOLO_ANCHORS) } }
+    private val postprocessor = Yolo11Postprocessor(labels, confidenceThreshold, iouThreshold)
+    private lateinit var output: Array<Array<FloatArray>>
     private var interpreter: Interpreter? = null
 
     override suspend fun detect(frame: AndroidVideoFrame): List<Detection> = process(frame).detections
@@ -101,20 +102,20 @@ class Yolo11LiteRtDetector private constructor(
             require(inputShape.contentEquals(intArrayOf(1, INPUT_SIZE, INPUT_SIZE, 3))) {
                 "Expected LiteRT input [1,$INPUT_SIZE,$INPUT_SIZE,3], received ${inputShape.contentToString()}"
             }
-            require(outputShape.contentEquals(intArrayOf(1, YOLO_CHANNELS, YOLO_ANCHORS))) {
-                "Expected LiteRT output [1,$YOLO_CHANNELS,$YOLO_ANCHORS], received ${outputShape.contentToString()}"
+            require(outputShape.size == 3 && outputShape[0] == 1 && outputShape[1] == 4 + labels.size) {
+                "Expected LiteRT output [1,${4 + labels.size},anchors], received ${outputShape.contentToString()}"
             }
+            output = Array(1) { Array(outputShape[1]) { FloatArray(outputShape[2]) } }
         }
     }
 
     companion object {
         private const val INPUT_SIZE = 640
-        private const val YOLO_CHANNELS = 84
-        private const val YOLO_ANCHORS = 8400
         private const val SNAPDRAGON_8_GEN_3_CPU_THREADS = 4
 
         suspend fun create(
             model: ByteArray,
+            labels: List<String>,
             executionProvider: LiteRtExecutionProvider,
             confidenceThreshold: Float = 0.25f,
             iouThreshold: Float = 0.45f,
@@ -126,6 +127,7 @@ class Yolo11LiteRtDetector private constructor(
             require(inputSize == INPUT_SIZE) { "This LiteRT model requires ${INPUT_SIZE}x$INPUT_SIZE input" }
             val detector = Yolo11LiteRtDetector(
                 model = model,
+                labels = labels,
                 executionProvider = executionProvider,
                 confidenceThreshold = confidenceThreshold,
                 iouThreshold = iouThreshold,

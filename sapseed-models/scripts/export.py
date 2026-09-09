@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 from ultralytics import YOLO
@@ -73,9 +75,29 @@ def make_litert_shapes_static(model_path: Path) -> int:
     return patched
 
 
+def export_onnx(model_path: Path, image_size: int, precision: str) -> Path:
+    export_options: dict[str, object] = {
+        "format": "onnx",
+        "imgsz": image_size,
+    }
+    if precision == "fp16":
+        export_options["half"] = True
+    elif precision == "int8":
+        raise ValueError(
+            "ONNX INT8 export is not supported; quantize with deployment calibration tooling"
+        )
+
+    exported = Path(YOLO(str(model_path)).export(**export_options))
+    patched = prepare_onnx_for_nnapi(exported)
+    print(f"Prepared {exported} for NNAPI ({patched} Split nodes patched)")
+    return exported
+
+
 def export_litert(model_path: Path, image_size: int, precision: str) -> Path:
     if precision == "int8":
-        raise ValueError("LiteRT INT8 export is disabled until a representative calibration set is available")
+        raise ValueError(
+            "LiteRT INT8 export is disabled until a representative calibration set is available"
+        )
 
     if model_path.suffix.lower() == ".onnx":
         onnx_path = model_path
@@ -88,8 +110,14 @@ def export_litert(model_path: Path, image_size: int, precision: str) -> Path:
             )
         )
     output_directory = Path("artifacts/litert") / onnx_path.stem
+    environment = os.environ.copy()
+    environment["PATH"] = (
+        str(Path(sys.executable).parent) + os.pathsep + environment.get("PATH", "")
+    )
     subprocess.run(
         [
+            sys.executable,
+            "-m",
             "onnx2tf",
             "-i",
             str(onnx_path),
@@ -97,6 +125,7 @@ def export_litert(model_path: Path, image_size: int, precision: str) -> Path:
             str(output_directory),
         ],
         check=True,
+        env=environment,
     )
     suffix = "float16" if precision == "fp16" else "float32"
     exported = output_directory / f"{onnx_path.stem}_{suffix}.tflite"
@@ -132,18 +161,7 @@ def main() -> None:
         export_litert(args.model, args.imgsz, args.precision)
         return
 
-    export_options: dict[str, object] = {
-        "format": "onnx",
-        "imgsz": args.imgsz,
-    }
-    if args.precision == "fp16":
-        export_options["half"] = True
-    elif args.precision == "int8":
-        raise ValueError("ONNX INT8 export is not supported; quantize with deployment calibration tooling")
-
-    exported = Path(YOLO(str(args.model)).export(**export_options))
-    patched = prepare_onnx_for_nnapi(exported)
-    print(f"Prepared {exported} for NNAPI ({patched} Split nodes patched)")
+    export_onnx(args.model, args.imgsz, args.precision)
 
 
 if __name__ == "__main__":

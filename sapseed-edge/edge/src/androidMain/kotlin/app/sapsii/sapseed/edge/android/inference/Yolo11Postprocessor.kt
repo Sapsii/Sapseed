@@ -6,17 +6,22 @@ import kotlin.math.max
 import kotlin.math.min
 
 internal class Yolo11Postprocessor(
+    private val labels: List<String>,
     private val confidenceThreshold: Float,
     private val iouThreshold: Float,
 ) {
+    init {
+        require(labels.isNotEmpty()) { "At least one model label is required" }
+    }
+
     fun decode(output: Array<FloatArray>, transform: LetterboxTransform): List<Detection> {
-        require(output.size == 4 + COCO_LABELS.size) {
-            "Expected ${4 + COCO_LABELS.size} YOLO channels, received ${output.size}"
+        require(output.size == 4 + labels.size) {
+            "Expected ${4 + labels.size} YOLO channels, received ${output.size}"
         }
         val anchorCount = output[0].size
         val bestClasses = IntArray(anchorCount)
         val bestConfidences = output[4].copyOf()
-        for (classIndex in 1 until COCO_LABELS.size) {
+        for (classIndex in 1 until labels.size) {
             val classScores = output[4 + classIndex]
             for (anchor in 0 until anchorCount) {
                 val score = classScores[anchor]
@@ -71,7 +76,7 @@ internal class Yolo11Postprocessor(
         }
         return selected.map { candidate ->
             Detection(
-                label = COCO_LABELS[candidate.classIndex],
+                label = labels[candidate.classIndex],
                 confidence = candidate.confidence,
                 bounds = candidate.bounds,
             )
@@ -101,16 +106,3 @@ private fun intersectionOverUnion(first: BoundingBox, second: BoundingBox): Floa
     val secondArea = (second.right - second.left) * (second.bottom - second.top)
     return intersection / (firstArea + secondArea - intersection).coerceAtLeast(1e-6f)
 }
-
-private val COCO_LABELS = listOf(
-    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
-    "traffic_light", "fire_hydrant", "stop_sign", "parking_meter", "bench", "bird", "cat", "dog",
-    "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
-    "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports_ball", "kite",
-    "baseball_bat", "baseball_glove", "skateboard", "surfboard", "tennis_racket", "bottle",
-    "wine_glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich",
-    "orange", "broccoli", "carrot", "hot_dog", "pizza", "donut", "cake", "chair", "couch",
-    "potted_plant", "bed", "dining_table", "toilet", "tv", "laptop", "mouse", "remote",
-    "keyboard", "cell_phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book",
-    "clock", "vase", "scissors", "teddy_bear", "hair_drier", "toothbrush",
-)

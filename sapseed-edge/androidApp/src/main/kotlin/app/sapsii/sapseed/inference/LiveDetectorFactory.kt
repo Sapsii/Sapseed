@@ -11,22 +11,31 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 enum class InferenceRuntime(val displayName: String, val modelAsset: String) {
-    ONNX_CPU("ONNX CPU", "yolo11n.onnx"),
-    ONNX_NNAPI("ONNX NNAPI", "yolo11n.onnx"),
-    LITERT_CPU("LiteRT CPU", "yolo11n.tflite"),
-    LITERT_GPU("LiteRT GPU", "yolo11n.tflite"),
+    ONNX_CPU("ONNX CPU", "sapseed.onnx"),
+    ONNX_NNAPI("ONNX NNAPI", "sapseed.onnx"),
+    LITERT_CPU("LiteRT CPU", "sapseed.tflite"),
+    LITERT_GPU("LiteRT GPU", "sapseed.tflite"),
 }
 
 object LiveDetectorFactory {
+    private const val LABELS_ASSET = "sapseed.labels"
+
     suspend fun create(context: Context, runtime: InferenceRuntime): YoloDetector {
         val model = withContext(Dispatchers.IO) {
             context.assets.open(runtime.modelAsset).use { it.readBytes() }
         }
+        val labels = withContext(Dispatchers.IO) {
+            context.assets.open(LABELS_ASSET).bufferedReader().useLines { lines ->
+                lines.map(String::trim).filter(String::isNotEmpty).toList()
+            }
+        }
+        require(labels.isNotEmpty()) { "$LABELS_ASSET contains no labels" }
         val tensorWriter = NativeRgbaTensorWriter()
         return when (runtime) {
             InferenceRuntime.ONNX_CPU -> withContext(Dispatchers.Default) {
                 Yolo11OnnxDetector(
                     model,
+                    labels,
                     OnnxExecutionProvider.CPU,
                     rgbaTensorWriter = tensorWriter,
                 )
@@ -35,6 +44,7 @@ object LiveDetectorFactory {
             InferenceRuntime.ONNX_NNAPI -> withContext(Dispatchers.Default) {
                 Yolo11OnnxDetector(
                     model,
+                    labels,
                     OnnxExecutionProvider.NNAPI,
                     rgbaTensorWriter = tensorWriter,
                 )
@@ -42,6 +52,7 @@ object LiveDetectorFactory {
 
             InferenceRuntime.LITERT_CPU -> Yolo11LiteRtDetector.create(
                 model,
+                labels,
                 LiteRtExecutionProvider.CPU,
                 rgbaTensorWriter = tensorWriter,
             )
@@ -52,6 +63,7 @@ object LiveDetectorFactory {
                 }
                 Yolo11LiteRtDetector.create(
                     model,
+                    labels,
                     LiteRtExecutionProvider.GPU,
                     rgbaTensorWriter = tensorWriter,
                     gpuSerializationDirectory = cacheDirectory.absolutePath,
