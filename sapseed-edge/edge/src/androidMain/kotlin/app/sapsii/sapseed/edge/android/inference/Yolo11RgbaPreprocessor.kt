@@ -94,9 +94,9 @@ internal class Yolo11RgbaPreprocessor(
                 putPixel(
                     outputIndex = outputIndex,
                     pixelCount = pixelCount,
-                    red = (buffer.get(sourceIndex + 1).toInt() and 0xff) / 255f,
-                    green = (buffer.get(sourceIndex + 2).toInt() and 0xff) / 255f,
-                    blue = (buffer.get(sourceIndex + 3).toInt() and 0xff) / 255f,
+                    red = (buffer.get(sourceIndex).toInt() and 0xff) / 255f,
+                    green = (buffer.get(sourceIndex + 1).toInt() and 0xff) / 255f,
+                    blue = (buffer.get(sourceIndex + 2).toInt() and 0xff) / 255f,
                 )
             }
         }

@@ -10,29 +10,10 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.ByteBuffer
-import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
-
-class MjpegVideoFrame internal constructor(
-    override val width: Int,
-    override val height: Int,
-    override val rgbaBuffer: ByteBuffer,
-    override val id: String = UUID.randomUUID().toString(),
-    override val capturedAtEpochMilliseconds: Long = System.currentTimeMillis(),
-) : RgbaVideoFrame {
-    override val rotationDegrees: Int = 0
-    override val rgbaRowStride: Int = width * RGBA_BYTES_PER_PIXEL
-    override val rgbaPixelStride: Int = RGBA_BYTES_PER_PIXEL
-
-    override fun release() = Unit
-
-    private companion object {
-        const val RGBA_BYTES_PER_PIXEL = 4
-    }
-}
 
 /** Reads an ESP32-CAM multipart MJPEG stream and keeps only its newest frame. */
 class MjpegFrameSource(
@@ -49,7 +30,7 @@ class MjpegFrameSource(
     private val executor = Executors.newSingleThreadExecutor { task ->
         Thread(task, "Sapseed-MJPEG").apply { isDaemon = true }
     }
-    private val url = URL(normalizeStreamUrl(streamUrl))
+    private val url = URL(WirelessCameraHttp.normalizeStreamUrl(streamUrl))
     @Volatile private var connection: HttpURLConnection? = null
 
     init {
@@ -82,10 +63,7 @@ class MjpegFrameSource(
     }
 
     private fun readStream() {
-        val activeConnection = (url.openConnection() as HttpURLConnection).apply {
-            connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = READ_TIMEOUT_MS
-            useCaches = false
+        val activeConnection = WirelessCameraHttp.open(url).apply {
             setRequestProperty("Accept", "multipart/x-mixed-replace")
         }
         connection = activeConnection
@@ -138,18 +116,18 @@ class MjpegFrameSource(
         }
     }
 
-    private fun Bitmap.toMjpegFrame(): MjpegVideoFrame {
+    private fun Bitmap.toMjpegFrame(): DecodedRgbaFrame {
         val pixels = IntArray(width * height)
         getPixels(pixels, 0, width, 0, 0, width, height)
         val rgba = ByteBuffer.allocateDirect(pixels.size * 4)
         pixels.forEach { pixel ->
-            rgba.put(((pixel ushr 24) and 0xff).toByte())
             rgba.put(((pixel ushr 16) and 0xff).toByte())
             rgba.put(((pixel ushr 8) and 0xff).toByte())
             rgba.put((pixel and 0xff).toByte())
+            rgba.put(((pixel ushr 24) and 0xff).toByte())
         }
         rgba.rewind()
-        return MjpegVideoFrame(width, height, rgba)
+        return DecodedRgbaFrame(width, height, rgba)
     }
 
     private fun InputStream.readAsciiLine(): String {
@@ -173,20 +151,8 @@ class MjpegFrameSource(
     }
 
     companion object {
-        private const val CONNECT_TIMEOUT_MS = 5_000
-        private const val READ_TIMEOUT_MS = 10_000
         private const val RECONNECT_DELAY_MS = 1_000L
         private const val MAX_JPEG_BYTES = 2 * 1024 * 1024
         private const val MAX_HEADER_LINE_LENGTH = 1_024
-
-        fun normalizeStreamUrl(value: String): String {
-            var normalized = value.trim()
-            if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
-                normalized = "http://$normalized"
-            }
-            val parsed = URL(normalized)
-            val path = parsed.path.orEmpty()
-            return if (path.isEmpty() || path == "/") "$normalized${if (normalized.endsWith('/')) "" else "/"}stream" else normalized
-        }
     }
 }

@@ -39,6 +39,74 @@ inline void rotated_to_source(
 }  // namespace
 
 extern "C" JNIEXPORT void JNICALL
+Java_app_sapsii_sapseed_edge_android_camera_H264FrameSource_nativeYuv420ToRgba(
+    JNIEnv* env,
+    jobject,
+    jobject y_buffer,
+    jint y_row_stride,
+    jint y_pixel_stride,
+    jobject u_buffer,
+    jint u_row_stride,
+    jint u_pixel_stride,
+    jobject v_buffer,
+    jint v_row_stride,
+    jint v_pixel_stride,
+    jint crop_left,
+    jint crop_top,
+    jint width,
+    jint height,
+    jobject rgba_buffer,
+    jintArray preview_argb
+) {
+    const auto* y_data = static_cast<const std::uint8_t*>(env->GetDirectBufferAddress(y_buffer));
+    const auto* u_data = static_cast<const std::uint8_t*>(env->GetDirectBufferAddress(u_buffer));
+    const auto* v_data = static_cast<const std::uint8_t*>(env->GetDirectBufferAddress(v_buffer));
+    auto* rgba = static_cast<std::uint8_t*>(env->GetDirectBufferAddress(rgba_buffer));
+    if (y_data == nullptr || u_data == nullptr || v_data == nullptr || rgba == nullptr) {
+        jclass exception = env->FindClass("java/lang/IllegalArgumentException");
+        env->ThrowNew(exception, "Native YUV conversion requires direct byte buffers");
+        return;
+    }
+
+    jint* preview = preview_argb == nullptr
+        ? nullptr
+        : env->GetIntArrayElements(preview_argb, nullptr);
+    int output_index = 0;
+    for (int y = 0; y < height; ++y) {
+        const int source_y = crop_top + y;
+        const auto* y_row = y_data + source_y * y_row_stride + crop_left * y_pixel_stride;
+        const int chroma_y = source_y / 2;
+        const auto* u_row = u_data + chroma_y * u_row_stride;
+        const auto* v_row = v_data + chroma_y * v_row_stride;
+        for (int x = 0; x < width; ++x, ++output_index) {
+            const int source_x = crop_left + x;
+            const int luma = y_row[x * y_pixel_stride] - 16;
+            const int u = u_row[(source_x / 2) * u_pixel_stride] - 128;
+            const int v = v_row[(source_x / 2) * v_pixel_stride] - 128;
+            const int red = std::clamp((298 * luma + 409 * v + 128) >> 8, 0, 255);
+            const int green = std::clamp((298 * luma - 100 * u - 208 * v + 128) >> 8, 0, 255);
+            const int blue = std::clamp((298 * luma + 516 * u + 128) >> 8, 0, 255);
+            auto* pixel = rgba + output_index * 4;
+            pixel[0] = static_cast<std::uint8_t>(red);
+            pixel[1] = static_cast<std::uint8_t>(green);
+            pixel[2] = static_cast<std::uint8_t>(blue);
+            pixel[3] = 255;
+            if (preview != nullptr) {
+                preview[output_index] = static_cast<jint>(
+                    0xff000000u |
+                    (static_cast<std::uint32_t>(red) << 16) |
+                    (static_cast<std::uint32_t>(green) << 8) |
+                    static_cast<std::uint32_t>(blue)
+                );
+            }
+        }
+    }
+    if (preview != nullptr) {
+        env->ReleaseIntArrayElements(preview_argb, preview, 0);
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_app_sapsii_sapseed_benchmark_NativeRgbaTensorWriter_nativeWrite(
     JNIEnv* env,
     jobject,
@@ -104,9 +172,9 @@ Java_app_sapsii_sapseed_benchmark_NativeRgbaTensorWriter_nativeWrite(
             );
             const auto* pixel = source + source_y * source_row_stride + source_x * source_pixel_stride;
             const int output_index = output_y * input_size + output_x;
-            const float red = pixel[1] * kInverse255;
-            const float green = pixel[2] * kInverse255;
-            const float blue = pixel[3] * kInverse255;
+            const float red = pixel[0] * kInverse255;
+            const float green = pixel[1] * kInverse255;
+            const float blue = pixel[2] * kInverse255;
             if (channels_first) {
                 target[output_index] = red;
                 target[pixel_count + output_index] = green;
