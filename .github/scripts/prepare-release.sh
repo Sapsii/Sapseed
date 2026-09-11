@@ -8,6 +8,8 @@ required_variables=(
   ANDROID_KEY_ALIAS
   ANDROID_KEY_PASSWORD
   GITHUB_RUN_NUMBER
+  SAPSEED_API_URL
+  SAPSEED_DEVICE_AUTHORIZATION
 )
 for variable in "${required_variables[@]}"; do
   if [[ -z "${!variable:-}" ]]; then
