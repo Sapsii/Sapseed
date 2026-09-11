@@ -69,6 +69,8 @@ Approximate JPEG usage varies with detail and noise:
 
 The hard byte cap protects storage when noisy or high-resolution frames compress poorly. Pending metadata is uploaded in JSON batches of up to 100 observations to Sapsii's `/v1/ingestion/batches` contract. Each item keeps its original client ID across retries, and the edge removes entries according to the API's per-item accepted/duplicate/rejected result.
 
+Each unit identifies itself as `DEVICE_NAME-IMEI_HASH{6}`. `DEVICE_NAME` is the name Android shows under Settings -> About phone, and the hash is the first six hex digits of a SHA-256 digest of the unit's IMEI. Because reading the IMEI needs `READ_PHONE_STATE` and is restricted to privileged callers from Android 10 onwards, the digest falls back to `Settings.Secure.ANDROID_ID` and then to the build fingerprint. Nothing has to be configured per unit: a fresh install already reports the id the platform provisions, and live detection shows it in its status line.
+
 Before metadata ingestion, each pending photo is reserved through `/v1/evidence/reservations`, uploaded with the returned signed `PUT`, completed through `/v1/evidence/:evidenceId/complete`, and referenced from its observation's `evidenceIds`. Captured evidence is encoded in the same upright orientation used by inference, including CameraX and decoded network-camera RGBA frames, so normalized bounding boxes align with the displayed JPEG. The wire model contains raw detector classes only. Missing infrastructure, congestion, vulnerable-pedestrian situations, rash driving, hit-and-run, and OCR are not inferred from the current YOLO detections.
 
 ## Deliberately not included

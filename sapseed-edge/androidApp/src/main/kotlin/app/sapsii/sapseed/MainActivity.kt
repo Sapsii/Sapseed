@@ -32,6 +32,7 @@ import app.sapsii.sapseed.edge.android.camera.WirelessCameraSources
 import app.sapsii.sapseed.edge.android.inference.AndroidFrameDetector
 import app.sapsii.sapseed.edge.android.inference.YoloDetector
 import app.sapsii.sapseed.edge.android.AndroidEdgeRuntimeFactory
+import app.sapsii.sapseed.edge.android.AndroidDeviceIdentity
 import app.sapsii.sapseed.edge.pipeline.EdgePipeline
 import java.net.URL
 import java.util.Locale
@@ -51,6 +52,11 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    /** `<device name from About phone>-<imei hash 6>`, the id the platform provisions. */
+    private val deviceExternalId: String by lazy {
+        AndroidDeviceIdentity.externalId(applicationContext)
+    }
+
     private lateinit var preview: PreviewView
     private lateinit var mobileOverlay: DetectionOverlayView
     private lateinit var tilesScroll: ScrollView
@@ -361,6 +367,7 @@ class MainActivity : ComponentActivity() {
 
         val endpoint = BuildConfig.SAPSEED_API_URL.trim()
         val authorization = BuildConfig.SAPSEED_DEVICE_AUTHORIZATION.trim()
+        Log.i(LOG_TAG, "Edge unit $deviceExternalId (serial source ${AndroidDeviceIdentity.serialSource(applicationContext)})")
         mobilePipeline = if (endpoint.isNotEmpty() && authorization.isNotEmpty()) {
             runCatching {
                 AndroidEdgeRuntimeFactory.create(
@@ -423,7 +430,7 @@ class MainActivity : ComponentActivity() {
                             "${detection.label}:${"%.2f".format(Locale.US, detection.confidence)}"
                         }.ifEmpty { "no objects" }
                     val uploadState = if (mobilePipeline == null) " · upload not configured" else " · queued $queued"
-                    val line = "${"%.1f".format(Locale.US, fps)} fps · " +
+                    val line = "$deviceExternalId · " + "${"%.1f".format(Locale.US, fps)} fps · " +
                         "${"%.0f".format(Locale.US, sample.totalMs)} ms · $summary$uploadState"
                     runOnUiThread {
                         mobileOverlay.show(sample.detections, rgba.width, rgba.height)
