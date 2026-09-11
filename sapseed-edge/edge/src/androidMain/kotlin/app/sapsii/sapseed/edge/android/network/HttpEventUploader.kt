@@ -62,7 +62,8 @@ class HttpEventUploader(
 
                 when (val status = connection.responseCode) {
                     in 200..299 -> parseCompletedResponse(connection.inputStream.bufferedReader().use { it.readText() })
-                    401, 403, 408, 409, 425, 429, in 500..599 -> BatchUploadResult.RetryLater
+                    401, 403 -> BatchUploadResult.CredentialRejected
+                    408, 409, 425, 429, in 500..599 -> BatchUploadResult.RetryLater
                     else -> BatchUploadResult.Completed(
                         observations.associate { it.id to UploadItemResult.Rejected("Backend returned HTTP $status") },
                     )

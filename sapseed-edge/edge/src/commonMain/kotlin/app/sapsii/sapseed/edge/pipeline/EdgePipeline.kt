@@ -1,6 +1,7 @@
 package app.sapsii.sapseed.edge.pipeline
 
 import app.sapsii.sapseed.edge.contract.BatchUploadResult
+import app.sapsii.sapseed.edge.contract.DevicePresenceReporter
 import app.sapsii.sapseed.edge.contract.EvidenceStore
 import app.sapsii.sapseed.edge.contract.FrameSource
 import app.sapsii.sapseed.edge.contract.InferenceEngine
@@ -8,6 +9,7 @@ import app.sapsii.sapseed.edge.contract.LocationSource
 import app.sapsii.sapseed.edge.contract.ObservationFactory
 import app.sapsii.sapseed.edge.contract.ObservationQueue
 import app.sapsii.sapseed.edge.contract.ObservationUploader
+import app.sapsii.sapseed.edge.contract.PresenceResult
 import app.sapsii.sapseed.edge.contract.UploadItemResult
 import app.sapsii.sapseed.edge.model.Detection
 import app.sapsii.sapseed.edge.model.UrbanObservation
@@ -21,7 +23,11 @@ class EdgePipeline(
     private val evidenceStore: EvidenceStore,
     private val observationQueue: ObservationQueue,
     private val observationUploader: ObservationUploader,
+    private val devicePresenceReporter: DevicePresenceReporter? = null,
 ) {
+    var credentialRejected: Boolean = false
+        private set
+
     suspend fun processNextFrame(): Int {
         val frame = frameSource.nextFrame() ?: return 0
         try {
@@ -46,10 +52,17 @@ class EdgePipeline(
 
     suspend fun uploadPending(limit: Int = 20): UploadBatchSummary {
         require(limit in 1..100) { "Upload limit must be between 1 and 100" }
+        if (credentialRejected) {
+            return UploadBatchSummary(0, 0, retryScheduled = false, credentialRejected = true)
+        }
         val pending = observationQueue.pending(limit)
         if (pending.isEmpty()) return UploadBatchSummary(0, 0, retryScheduled = false)
 
         return when (val batch = observationUploader.upload(pending)) {
+            BatchUploadResult.CredentialRejected -> {
+                credentialRejected = true
+                UploadBatchSummary(0, 0, retryScheduled = false, credentialRejected = true)
+            }
             BatchUploadResult.RetryLater -> UploadBatchSummary(0, 0, retryScheduled = true)
             is BatchUploadResult.Completed -> {
                 var accepted = 0
@@ -81,10 +94,18 @@ class EdgePipeline(
         observation.evidence.forEach { evidenceStore.delete(it) }
         observationQueue.remove(observation.id)
     }
+
+    suspend fun reportPresence(): PresenceResult {
+        val reporter = devicePresenceReporter ?: return PresenceResult.Unavailable
+        val result = reporter.reportAlive()
+        if (result is PresenceResult.CredentialRejected) credentialRejected = true
+        return result
+    }
 }
 
 data class UploadBatchSummary(
     val accepted: Int,
     val rejected: Int,
     val retryScheduled: Boolean,
+    val credentialRejected: Boolean = false,
 )

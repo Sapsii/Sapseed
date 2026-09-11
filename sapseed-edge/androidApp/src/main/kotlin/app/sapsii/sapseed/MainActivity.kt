@@ -40,6 +40,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import app.sapsii.sapseed.edge.contract.FrameSource
+import app.sapsii.sapseed.edge.contract.PresenceResult
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlinx.coroutines.CancellationException
@@ -394,6 +395,7 @@ class MainActivity : ComponentActivity() {
             var lastUiUpdate = 0L
             var nextRecordAt = windowStart
             var nextUploadAt = windowStart + UPLOAD_INTERVAL_MS
+            var nextPresenceAt = windowStart
             while (isActive) {
                 val frame = source.nextFrame() ?: break
                 val rgba = frame as? RgbaVideoFrame
@@ -429,7 +431,11 @@ class MainActivity : ComponentActivity() {
                         .joinToString(" ") { detection ->
                             "${detection.label}:${"%.2f".format(Locale.US, detection.confidence)}"
                         }.ifEmpty { "no objects" }
-                    val uploadState = if (mobilePipeline == null) " · upload not configured" else " · queued $queued"
+                    val uploadState = when {
+                        mobilePipeline == null -> " · upload not configured"
+                        mobilePipeline?.credentialRejected == true -> " · CREDENTIAL REJECTED"
+                        else -> " · queued $queued"
+                    }
                     val line = "$deviceExternalId · " + "${"%.1f".format(Locale.US, fps)} fps · " +
                         "${"%.0f".format(Locale.US, sample.totalMs)} ms · $summary$uploadState"
                     runOnUiThread {
@@ -441,10 +447,23 @@ class MainActivity : ComponentActivity() {
                     try {
                         val uploaded = mobilePipeline?.uploadPending()
                         if (uploaded != null && uploaded.accepted > 0) queued = (queued - uploaded.accepted).coerceAtLeast(0)
+                        if (uploaded?.credentialRejected == true) {
+                            Log.w(LOG_TAG, "Device credential rejected: this unit was deactivated or its secret was rotated")
+                        }
                     } catch (error: Throwable) {
                         Log.w(LOG_TAG, "Pending observation upload deferred", error)
                     }
                     nextUploadAt = SystemClock.elapsedRealtime() + UPLOAD_INTERVAL_MS
+                }
+                if (now >= nextPresenceAt) {
+                    try {
+                        if (mobilePipeline?.reportPresence() is PresenceResult.CredentialRejected) {
+                            Log.w(LOG_TAG, "Heartbeat rejected: this unit was deactivated or its secret was rotated")
+                        }
+                    } catch (error: Throwable) {
+                        Log.w(LOG_TAG, "Presence report deferred", error)
+                    }
+                    nextPresenceAt = SystemClock.elapsedRealtime() + PRESENCE_INTERVAL_MS
                 }
             }
         }
@@ -682,6 +701,8 @@ class MainActivity : ComponentActivity() {
         private const val UI_UPDATE_INTERVAL_MS = 500L
         private const val UPLOAD_INTERVAL_MS = 2_000L
         private const val OBSERVATION_INTERVAL_MS = 2_000L
+
+        private const val PRESENCE_INTERVAL_MS = 60_000L
         private const val LIVE_CONFIDENCE_THRESHOLD = 0.25f
         private val BROADCAST_RESOLUTION = Size(640, 480)
     }

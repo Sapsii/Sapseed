@@ -54,8 +54,20 @@ sealed interface UploadItemResult {
 sealed interface BatchUploadResult {
     data class Completed(val resultsByObservationId: Map<String, UploadItemResult>) : BatchUploadResult
     data object RetryLater : BatchUploadResult
+
+    data object CredentialRejected : BatchUploadResult
 }
 
 interface ObservationUploader {
     suspend fun upload(observations: List<UrbanObservation>): BatchUploadResult
+}
+
+sealed interface PresenceResult {
+    data object Alive : PresenceResult
+    data object CredentialRejected : PresenceResult
+    data object Unavailable : PresenceResult
+}
+
+interface DevicePresenceReporter {
+    suspend fun reportAlive(): PresenceResult
 }

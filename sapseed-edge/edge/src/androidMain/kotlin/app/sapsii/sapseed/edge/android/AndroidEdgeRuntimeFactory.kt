@@ -4,6 +4,7 @@ import android.content.Context
 import app.sapsii.sapseed.edge.android.inference.AndroidFrameDetector
 import app.sapsii.sapseed.edge.android.inference.AndroidInferenceEngine
 import app.sapsii.sapseed.edge.android.location.AndroidLocationSource
+import app.sapsii.sapseed.edge.android.network.HttpDevicePresence
 import app.sapsii.sapseed.edge.android.network.HttpEventUploader
 import app.sapsii.sapseed.edge.android.storage.AndroidEventQueue
 import app.sapsii.sapseed.edge.android.storage.FileEvidenceStore
@@ -51,6 +52,10 @@ object AndroidEdgeRuntimeFactory {
                 modelVersion = modelVersion,
                 modelRuntime = modelRuntime,
                 tripId = tripId,
+            ),
+            devicePresenceReporter = HttpDevicePresence(
+                ingestionEndpoint = ingestionEndpoint,
+                authorizationHeader = authorizationHeader,
             ),
         )
     }
