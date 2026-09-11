@@ -1,5 +1,14 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
+fun readDotEnv(file: File): Map<String, String> = if (!file.isFile) emptyMap() else file.readLines()
+    .map(String::trim)
+    .filter { it.isNotEmpty() && !it.startsWith("#") && '=' in it }
+    .associate { line -> line.substringBefore('=').trim() to line.substringAfter('=').trim().removeSurrounding("\"") }
+
+val dotEnv = readDotEnv(rootProject.file(".env"))
+fun localSetting(name: String): String = providers.environmentVariable(name).orNull ?: dotEnv[name].orEmpty()
+fun quotedBuildConfig(value: String): String = "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+
 plugins {
     alias(libs.plugins.androidApplication)
 }
@@ -43,6 +52,8 @@ android {
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = providers.environmentVariable("SAPSEED_VERSION_CODE").orElse("1").get().toInt()
         versionName = providers.environmentVariable("SAPSEED_VERSION_NAME").orElse("1.0").get()
+        buildConfigField("String", "SAPSEED_API_URL", quotedBuildConfig(localSetting("SAPSEED_API_URL")))
+        buildConfigField("String", "SAPSEED_DEVICE_AUTHORIZATION", quotedBuildConfig(localSetting("SAPSEED_DEVICE_AUTHORIZATION")))
 
         ndk {
             abiFilters += "arm64-v8a"
@@ -64,6 +75,16 @@ android {
         getByName("release") {
             isDebuggable = false
             signingConfig = signingConfigs.findByName("release")
+        }
+    }
+
+    buildFeatures {
+        buildConfig = true
+    }
+    buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
         }
     }
 

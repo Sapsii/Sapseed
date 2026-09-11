@@ -2,12 +2,13 @@ package app.sapsii.sapseed.edge.android.storage
 
 import android.content.Context
 import android.util.AtomicFile
-import app.sapsii.sapseed.edge.contract.EventQueue
-import app.sapsii.sapseed.edge.contract.EventQueueStats
+import app.sapsii.sapseed.edge.contract.ObservationQueue
+import app.sapsii.sapseed.edge.contract.ObservationQueueStats
+import app.sapsii.sapseed.edge.model.BoundingBox
+import app.sapsii.sapseed.edge.model.DetectionClass
 import app.sapsii.sapseed.edge.model.EvidenceReference
-import app.sapsii.sapseed.edge.model.EventType
 import app.sapsii.sapseed.edge.model.GeoPoint
-import app.sapsii.sapseed.edge.model.UrbanEvent
+import app.sapsii.sapseed.edge.model.UrbanObservation
 import app.sapsii.sapseed.edge.storage.EventRetentionPolicy
 import app.sapsii.sapseed.edge.storage.evidenceSizeBytes
 import java.io.File
@@ -22,69 +23,71 @@ class AndroidEventQueue(
     context: Context,
     fileName: String = "pending-events.json",
     private val retentionPolicy: EventRetentionPolicy = EventRetentionPolicy(),
-) : EventQueue {
+) : ObservationQueue {
     private val atomicFile = AtomicFile(File(context.filesDir, fileName))
     private val mutex = Mutex()
 
-    override suspend fun enqueue(event: UrbanEvent): List<UrbanEvent> = mutex.withLock {
+    override suspend fun enqueue(observation: UrbanObservation): List<UrbanObservation> = mutex.withLock {
         withContext(Dispatchers.IO) {
-            val events = readEvents()
-            if (events.any { it.id == event.id }) {
-                // Preserve the already durable event and tell the caller to delete the duplicate evidence.
-                return@withContext listOf(event)
+            val observations = readObservations()
+            if (observations.any { it.id == observation.id }) {
+                return@withContext listOf(observation)
             }
 
-            events += event
-            events.sortBy(UrbanEvent::occurredAtEpochMilliseconds)
-            val evicted = retentionPolicy.evictOverflow(events)
-            writeEvents(events)
+            observations += observation
+            observations.sortBy(UrbanObservation::capturedAtEpochMilliseconds)
+            val evicted = retentionPolicy.evictOverflow(observations)
+            writeObservations(observations)
             evicted
         }
     }
 
-    override suspend fun pending(limit: Int): List<UrbanEvent> {
-        require(limit > 0) { "Pending-event limit must be positive" }
+    override suspend fun pending(limit: Int): List<UrbanObservation> {
+        require(limit > 0) { "Pending-observation limit must be positive" }
         return mutex.withLock {
-            withContext(Dispatchers.IO) { readEvents().sortedBy(UrbanEvent::occurredAtEpochMilliseconds).take(limit) }
-        }
-    }
-
-    override suspend fun remove(eventId: String) {
-        mutate { events -> events.removeAll { it.id == eventId } }
-    }
-
-    override suspend fun stats(): EventQueueStats = mutex.withLock {
-        withContext(Dispatchers.IO) {
-            val events = readEvents()
-            EventQueueStats(
-                eventCount = events.size,
-                evidenceBytes = events.sumOf(UrbanEvent::evidenceSizeBytes),
-            )
-        }
-    }
-
-    private suspend fun mutate(block: (MutableList<UrbanEvent>) -> Unit) {
-        mutex.withLock {
             withContext(Dispatchers.IO) {
-                val events = readEvents()
-                block(events)
-                writeEvents(events)
+                readObservations().sortedBy(UrbanObservation::capturedAtEpochMilliseconds).take(limit)
             }
         }
     }
 
-    private fun readEvents(): MutableList<UrbanEvent> {
-        if (!atomicFile.baseFile.exists() || atomicFile.baseFile.length() == 0L) return mutableListOf()
-        val content = atomicFile.openRead().bufferedReader().use { it.readText() }
-        val array = JSONArray(content)
-        return MutableList(array.length()) { index -> array.getJSONObject(index).toUrbanEvent() }
+    override suspend fun remove(observationId: String) {
+        mutate { observations -> observations.removeAll { it.id == observationId } }
     }
 
-    private fun writeEvents(events: List<UrbanEvent>) {
+    override suspend fun stats(): ObservationQueueStats = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            val observations = readObservations()
+            ObservationQueueStats(
+                observationCount = observations.size,
+                evidenceBytes = observations.sumOf(UrbanObservation::evidenceSizeBytes),
+            )
+        }
+    }
+
+    private suspend fun mutate(block: (MutableList<UrbanObservation>) -> Unit) {
+        mutex.withLock {
+            withContext(Dispatchers.IO) {
+                val observations = readObservations()
+                block(observations)
+                writeObservations(observations)
+            }
+        }
+    }
+
+    private fun readObservations(): MutableList<UrbanObservation> {
+        if (!atomicFile.baseFile.exists() || atomicFile.baseFile.length() == 0L) return mutableListOf()
+        val array = JSONArray(atomicFile.openRead().bufferedReader().use { it.readText() })
+        return mutableListOf<UrbanObservation>().apply {
+            repeat(array.length()) { index -> array.getJSONObject(index).toUrbanObservationOrNull()?.let(::add) }
+        }
+    }
+
+    private fun writeObservations(observations: List<UrbanObservation>) {
         val output = atomicFile.startWrite()
         try {
             output.bufferedWriter().apply {
-                write(JSONArray(events.map(UrbanEvent::toJson)).toString())
+                write(JSONArray(observations.map(UrbanObservation::toJson)).toString())
                 flush()
             }
             atomicFile.finishWrite(output)
@@ -95,17 +98,26 @@ class AndroidEventQueue(
     }
 }
 
-internal fun UrbanEvent.toJson(): JSONObject = JSONObject().apply {
+internal fun UrbanObservation.toJson(): JSONObject = JSONObject().apply {
     put("id", id)
-    put("deviceId", deviceId)
-    put("type", type.name)
+    put("detectionClassId", detectionClass.classId)
+    put("detectionClassName", detectionClass.wireName)
     put("confidence", confidence.toDouble())
-    put("occurredAtEpochMilliseconds", occurredAtEpochMilliseconds)
+    put("capturedAtEpochMilliseconds", capturedAtEpochMilliseconds)
     put("location", JSONObject().apply {
         put("latitude", location.latitude)
         put("longitude", location.longitude)
         location.accuracyMeters?.let { put("accuracyMeters", it.toDouble()) }
     })
+    put("boundingBox", JSONObject().apply {
+        put("left", boundingBox.left.toDouble())
+        put("top", boundingBox.top.toDouble())
+        put("right", boundingBox.right.toDouble())
+        put("bottom", boundingBox.bottom.toDouble())
+    })
+    trackingId?.let { put("trackingId", it) }
+    put("cameraId", cameraId)
+    put("frameId", frameId)
     put("evidence", JSONArray(evidence.map { reference ->
         JSONObject().apply {
             put("localId", reference.localId)
@@ -113,28 +125,54 @@ internal fun UrbanEvent.toJson(): JSONObject = JSONObject().apply {
             put("sizeBytes", reference.sizeBytes)
         }
     }))
-    put("attributes", JSONObject(attributes))
+    put("metadata", JSONObject(metadata))
 }
 
-private fun JSONObject.toUrbanEvent(): UrbanEvent {
-    val location = getJSONObject("location")
-    val evidenceJson = getJSONArray("evidence")
-    val attributesJson = getJSONObject("attributes")
-    return UrbanEvent(
+private fun JSONObject.toUrbanObservationOrNull(): UrbanObservation? = runCatching {
+    val locationJson = getJSONObject("location")
+    val evidenceJson = optJSONArray("evidence") ?: JSONArray()
+    val legacyAttributes = optJSONObject("attributes")
+    val detectionClass = if (has("detectionClassId")) {
+        DetectionClass.fromClassId(getInt("detectionClassId"))
+    } else {
+        legacyAttributes?.optString("label")?.let(DetectionClass::fromLabel)
+    } ?: return null
+
+    val bounds = optJSONObject("boundingBox")?.let { box ->
+        BoundingBox(
+            left = box.getDouble("left").toFloat(),
+            top = box.getDouble("top").toFloat(),
+            right = box.getDouble("right").toFloat(),
+            bottom = box.getDouble("bottom").toFloat(),
+        )
+    } ?: legacyAttributes?.optString("boundingBox")
+        ?.split(',')
+        ?.takeIf { it.size == 4 }
+        ?.map(String::toFloat)
+        ?.let { values -> BoundingBox(values[0], values[1], values[2], values[3]) }
+        ?: return null
+
+    UrbanObservation(
         id = getString("id"),
-        deviceId = getString("deviceId"),
-        type = EventType.valueOf(getString("type")),
+        detectionClass = detectionClass,
         confidence = getDouble("confidence").toFloat(),
-        occurredAtEpochMilliseconds = getLong("occurredAtEpochMilliseconds"),
+        capturedAtEpochMilliseconds = optLong("capturedAtEpochMilliseconds", optLong("occurredAtEpochMilliseconds")),
         location = GeoPoint(
-            latitude = location.getDouble("latitude"),
-            longitude = location.getDouble("longitude"),
-            accuracyMeters = if (location.has("accuracyMeters")) {
-                location.getDouble("accuracyMeters").toFloat()
+            latitude = locationJson.getDouble("latitude"),
+            longitude = locationJson.getDouble("longitude"),
+            accuracyMeters = if (locationJson.has("accuracyMeters")) {
+                locationJson.getDouble("accuracyMeters").toFloat()
             } else {
                 null
             },
         ),
+        boundingBox = bounds,
+        trackingId = optString("trackingId").takeIf(String::isNotBlank)
+            ?: legacyAttributes?.optString("trackingId")?.takeIf(String::isNotBlank),
+        cameraId = optString("cameraId", "primary"),
+        frameId = optString("frameId").takeIf(String::isNotBlank)
+            ?: legacyAttributes?.optString("sourceFrameId")?.takeIf(String::isNotBlank)
+            ?: "legacy-${getString("id")}",
         evidence = List(evidenceJson.length()) { index ->
             evidenceJson.getJSONObject(index).let { evidence ->
                 EvidenceReference(
@@ -144,6 +182,8 @@ private fun JSONObject.toUrbanEvent(): UrbanEvent {
                 )
             }
         },
-        attributes = attributesJson.keys().asSequence().associateWith(attributesJson::getString),
+        metadata = optJSONObject("metadata")?.let { metadata ->
+            metadata.keys().asSequence().associateWith(metadata::getString)
+        }.orEmpty(),
     )
-}
+}.getOrNull()

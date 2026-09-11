@@ -12,6 +12,7 @@ import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -28,7 +29,11 @@ import app.sapsii.sapseed.edge.android.camera.CameraXFrameSource
 import app.sapsii.sapseed.edge.android.camera.RgbaFrameListener
 import app.sapsii.sapseed.edge.android.camera.RgbaVideoFrame
 import app.sapsii.sapseed.edge.android.camera.WirelessCameraSources
+import app.sapsii.sapseed.edge.android.inference.AndroidFrameDetector
 import app.sapsii.sapseed.edge.android.inference.YoloDetector
+import app.sapsii.sapseed.edge.android.AndroidEdgeRuntimeFactory
+import app.sapsii.sapseed.edge.pipeline.EdgePipeline
+import java.net.URL
 import java.util.Locale
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
@@ -47,6 +52,7 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var preview: PreviewView
+    private lateinit var mobileOverlay: DetectionOverlayView
     private lateinit var tilesScroll: ScrollView
     private lateinit var tilesGrid: GridLayout
     private lateinit var liveButton: Button
@@ -61,6 +67,8 @@ class MainActivity : ComponentActivity() {
     private val connectJobs = mutableListOf<Job>()
     private val discoveredUrls = mutableSetOf<String>()
     private var liveJob: Job? = null
+    private var mobileDetectJob: Job? = null
+    private var mobilePipeline: EdgePipeline? = null
     private var liveDetector: YoloDetector? = null
     private val detectorMutex = Mutex()
     private var selectedRuntime = InferenceRuntime.LITERT_GPU
@@ -99,6 +107,7 @@ class MainActivity : ComponentActivity() {
         broadcaster = null
         connectJobs.forEach { it.cancel() }
         liveJob?.cancel()
+        mobileDetectJob?.cancel()
         wirelessTiles.forEach { it.source?.close() }
         runCatching { liveDetector?.close() }
         liveDetector = null
@@ -141,8 +150,10 @@ class MainActivity : ComponentActivity() {
                     )
                 }.onSuccess { source ->
                     frameSource = source
+                    mobileOverlay.clear()
                     if (broadcaster == null) {
                         status.setText(R.string.camera_ready)
+                        refreshWirelessUi()
                     }
                 }.onFailure { error ->
                     Log.e(LOG_TAG, "Camera startup failed", error)
@@ -224,7 +235,7 @@ class MainActivity : ComponentActivity() {
         preview.visibility = android.view.View.GONE
         tilesScroll.visibility = android.view.View.VISIBLE
         val views = createTileViews(displayName)
-        val tile = WirelessTile(displayName, views.root, views.preview, views.status)
+        val tile = WirelessTile(displayName, views.root, views.preview, views.overlay, views.status)
         views.remove.setOnClickListener { removeTile(tile) }
         wirelessTiles += tile
         refreshWirelessUi()
@@ -279,7 +290,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun refreshWirelessUi() {
-        if (wirelessTiles.isEmpty()) return
+        if (wirelessTiles.isEmpty()) {
+            runtimeButton.isEnabled = liveJob == null
+            liveButton.isEnabled = frameSource != null && broadcaster == null
+            liveButton.setText(if (liveJob != null) R.string.live_detect_on else R.string.live_detect_off)
+            return
+        }
         val names = wirelessTiles.joinToString { it.name }
         status.text = "${wirelessTiles.size} wireless camera(s): $names"
         cameraButton.text = "${getString(R.string.camera_source_wireless)} (${wirelessTiles.size})"
@@ -290,7 +306,7 @@ class MainActivity : ComponentActivity() {
 
     private fun setLiveDetect(enabled: Boolean) {
         if (enabled) {
-            if (liveJob != null || wirelessTiles.isEmpty()) return
+            if (liveJob != null || (wirelessTiles.isEmpty() && frameSource == null)) return
             runtimeButton.isEnabled = false
             liveButton.isEnabled = false
             liveButton.setText(R.string.live_detect_starting)
@@ -311,16 +327,22 @@ class MainActivity : ComponentActivity() {
                     return@launch
                 }
                 liveDetector = detector
-                wirelessTiles.forEach { startTileLoop(it) }
+                if (wirelessTiles.isEmpty()) startMobileLoop() else wirelessTiles.forEach { startTileLoop(it) }
                 runOnUiThread { refreshWirelessUi() }
+                while (isActive) delay(1_000)
             }
         } else {
             val job = liveJob ?: return
             liveJob = null
             runtimeButton.isEnabled = true
+            mobileDetectJob?.cancel()
+            mobileDetectJob = null
+            mobilePipeline = null
+            mobileOverlay.clear()
             wirelessTiles.forEach {
                 it.detectJob?.cancel()
                 it.detectJob = null
+                it.overlay.clear()
             }
             val detector = liveDetector
             liveDetector = null
@@ -328,6 +350,104 @@ class MainActivity : ComponentActivity() {
             refreshWirelessUi()
             if (detector != null) {
                 scope.launch(Dispatchers.Default) { runCatching { detector.close() } }
+            }
+        }
+    }
+
+    private fun startMobileLoop() {
+        val source = frameSource ?: return
+        val detector = liveDetector ?: return
+        if (mobileDetectJob?.isActive == true) return
+
+        val endpoint = BuildConfig.SAPSEED_API_URL.trim()
+        val authorization = BuildConfig.SAPSEED_DEVICE_AUTHORIZATION.trim()
+        mobilePipeline = if (endpoint.isNotEmpty() && authorization.isNotEmpty()) {
+            runCatching {
+                AndroidEdgeRuntimeFactory.create(
+                    context = applicationContext,
+                    frameSource = source,
+                    detector = detector as AndroidFrameDetector,
+                    ingestionEndpoint = URL("${endpoint.trimEnd('/')}/v1/ingestion/batches"),
+                    authorizationHeader = { authorization },
+                    softwareVersion = BuildConfig.VERSION_NAME,
+                    modelVersion = "sapseed",
+                    modelRuntime = selectedRuntime.displayName,
+                    cameraId = "builtin-primary",
+                    minimumConfidence = LIVE_CONFIDENCE_THRESHOLD,
+                )
+            }.onFailure { Log.e(LOG_TAG, "Observation pipeline unavailable", it) }.getOrNull()
+        } else {
+            null
+        }
+
+        mobileDetectJob = scope.launch(Dispatchers.Default) {
+            var count = 0
+            var queued = 0
+            var windowStart = SystemClock.elapsedRealtime()
+            var lastUiUpdate = 0L
+            var nextRecordAt = windowStart
+            var nextUploadAt = windowStart + UPLOAD_INTERVAL_MS
+            while (isActive) {
+                val frame = source.nextFrame() ?: break
+                val rgba = frame as? RgbaVideoFrame
+                if (rgba == null) {
+                    frame.release()
+                    continue
+                }
+                val sample = try {
+                    detectorMutex.withLock { detector.process(rgba) }
+                } catch (error: Throwable) {
+                    frame.release()
+                    throw error
+                }
+                val now = SystemClock.elapsedRealtime()
+                try {
+                    if (now >= nextRecordAt) {
+                        queued += mobilePipeline?.recordDetections(frame, sample.detections) ?: 0
+                        nextRecordAt = now + OBSERVATION_INTERVAL_MS
+                    }
+                } catch (error: Throwable) {
+                    Log.e(LOG_TAG, "Could not queue detections", error)
+                } finally {
+                    frame.release()
+                }
+
+                count++
+                if (now - lastUiUpdate >= UI_UPDATE_INTERVAL_MS) {
+                    val fps = count * 1000.0 / (now - windowStart).coerceAtLeast(1)
+                    count = 0
+                    windowStart = now
+                    lastUiUpdate = now
+                    val summary = sample.detections.sortedByDescending { it.confidence }.take(3)
+                        .joinToString(" ") { detection ->
+                            "${detection.label}:${"%.2f".format(Locale.US, detection.confidence)}"
+                        }.ifEmpty { "no objects" }
+                    val uploadState = if (mobilePipeline == null) " · upload not configured" else " · queued $queued"
+                    val line = "${"%.1f".format(Locale.US, fps)} fps · " +
+                        "${"%.0f".format(Locale.US, sample.totalMs)} ms · $summary$uploadState"
+                    runOnUiThread {
+                        mobileOverlay.show(sample.detections, rgba.width, rgba.height)
+                        status.text = line
+                    }
+                }
+                if (now >= nextUploadAt) {
+                    try {
+                        val uploaded = mobilePipeline?.uploadPending()
+                        if (uploaded != null && uploaded.accepted > 0) queued = (queued - uploaded.accepted).coerceAtLeast(0)
+                    } catch (error: Throwable) {
+                        Log.w(LOG_TAG, "Pending observation upload deferred", error)
+                    }
+                    nextUploadAt = SystemClock.elapsedRealtime() + UPLOAD_INTERVAL_MS
+                }
+            }
+        }
+        mobileDetectJob?.invokeOnCompletion { error ->
+            if (error != null && error !is CancellationException) {
+                Log.e(LOG_TAG, "Built-in camera live detection stopped", error)
+                runOnUiThread {
+                    if (liveJob != null) setLiveDetect(false)
+                    status.text = "Live detection failed: ${error.message ?: error::class.java.simpleName}"
+                }
             }
         }
     }
@@ -355,6 +475,7 @@ class MainActivity : ComponentActivity() {
                     count = 0
                     windowStart = now
                     tile.lastUiUpdate = now
+                    runOnUiThread { tile.overlay.show(sample.detections, rgba.width, rgba.height) }
                     val summary = sample.detections.sortedByDescending { it.confidence }.take(3)
                         .joinToString(" ") { detection ->
                             "${detection.label}:${"%.2f".format(Locale.US, detection.confidence)}"
@@ -384,14 +505,19 @@ class MainActivity : ComponentActivity() {
         header.addView(remove, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
         val preview = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
+        }
+        val overlay = DetectionOverlayView(this)
+        val previewStack = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, dp(TILE_PREVIEW_HEIGHT_DP))
+            addView(preview, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+            addView(overlay, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         }
         val status = TextView(this).apply {
             textSize = 12f
             setText(R.string.camera_connecting)
         }
         root.addView(header, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-        root.addView(preview)
+        root.addView(previewStack)
         root.addView(status, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         tilesGrid.addView(
             root,
@@ -400,7 +526,7 @@ class MainActivity : ComponentActivity() {
                 GridLayout.spec(GridLayout.UNDEFINED, GridLayout.FILL, 1f),
             ).apply { width = 0 },
         )
-        return TileViews(root, preview, status, remove)
+        return TileViews(root, preview, overlay, status, remove)
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
@@ -494,7 +620,14 @@ class MainActivity : ComponentActivity() {
         preview = PreviewView(context).apply {
             scaleType = PreviewView.ScaleType.FILL_CENTER
         }
-        addView(preview, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
+        mobileOverlay = DetectionOverlayView(context)
+        addView(
+            FrameLayout(context).apply {
+                addView(preview, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+                addView(mobileOverlay, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+            },
+            LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f),
+        )
         tilesScroll = ScrollView(context).apply {
             visibility = android.view.View.GONE
         }
@@ -516,6 +649,7 @@ class MainActivity : ComponentActivity() {
         val name: String,
         val root: LinearLayout,
         val preview: ImageView,
+        val overlay: DetectionOverlayView,
         val status: TextView,
     ) {
         var source: FrameSource? = null
@@ -528,6 +662,7 @@ class MainActivity : ComponentActivity() {
     private data class TileViews(
         val root: LinearLayout,
         val preview: ImageView,
+        val overlay: DetectionOverlayView,
         val status: TextView,
         val remove: Button,
     )
@@ -538,6 +673,9 @@ class MainActivity : ComponentActivity() {
         private const val TILE_COLUMNS = 2
         private const val TILE_PREVIEW_HEIGHT_DP = 200
         private const val UI_UPDATE_INTERVAL_MS = 500L
+        private const val UPLOAD_INTERVAL_MS = 2_000L
+        private const val OBSERVATION_INTERVAL_MS = 2_000L
+        private const val LIVE_CONFIDENCE_THRESHOLD = 0.25f
         private val BROADCAST_RESOLUTION = Size(640, 480)
     }
 }

@@ -20,7 +20,7 @@ data class GeoPoint(
     init {
         require(latitude in -90.0..90.0) { "Latitude must be between -90 and 90" }
         require(longitude in -180.0..180.0) { "Longitude must be between -180 and 180" }
-        require(accuracyMeters == null || accuracyMeters >= 0f) { "Accuracy cannot be negative" }
+        require(accuracyMeters == null || accuracyMeters in 0f..10_000f) { "Accuracy must be between 0 and 10000 metres" }
     }
 }
 
@@ -50,19 +50,33 @@ data class Detection(
     }
 }
 
-enum class EventType {
-    POTHOLE,
-    DAMAGED_ROAD,
-    MISSING_ROAD_DIVIDER,
-    MISSING_ZEBRA_CROSSING,
-    DAMAGED_TRAFFIC_SIGN,
-    MISSING_TRAFFIC_SIGN,
-    WATERLOGGING,
-    TRAFFIC_CONGESTION,
-    VULNERABLE_PEDESTRIAN,
-    RASH_DRIVING,
-    HIT_AND_RUN,
-    OTHER_HAZARD,
+enum class DetectionClass(val classId: Int, val wireName: String) {
+    PERSON(0, "person"),
+    BICYCLE(1, "bicycle"),
+    MOTORCYCLE(2, "motorcycle"),
+    AUTORICKSHAW(3, "autorickshaw"),
+    CAR(4, "car"),
+    BUS(5, "bus"),
+    TRUCK(6, "truck"),
+    POTHOLE(7, "pothole"),
+    LONGITUDINAL_CRACK(8, "longitudinal_crack"),
+    TRANSVERSE_CRACK(9, "transverse_crack"),
+    ALLIGATOR_CRACK(10, "alligator_crack"),
+    DAMAGED_ROAD(11, "damaged_road"),
+    WATERLOGGING(12, "waterlogging"),
+    MANHOLE(13, "manhole"),
+    TRAFFIC_SIGN(14, "traffic_sign"),
+    TRAFFIC_LIGHT(15, "traffic_light"),
+    ZEBRA_CROSSING(16, "zebra_crossing"),
+    ROAD_DIVIDER(17, "road_divider"),
+    ANIMAL(18, "animal"),
+    SPEED_BUMP(19, "speed_bump"),
+    UNSURFACED_ROAD(20, "unsurfaced_road");
+
+    companion object {
+        fun fromLabel(label: String): DetectionClass? = entries.firstOrNull { it.wireName == label.normalizedLabel() }
+        fun fromClassId(classId: Int): DetectionClass? = entries.firstOrNull { it.classId == classId }
+    }
 }
 
 data class EvidenceReference(
@@ -77,19 +91,26 @@ data class EvidenceReference(
     }
 }
 
-data class UrbanEvent(
+data class UrbanObservation(
     val id: String,
-    val deviceId: String,
-    val type: EventType,
+    val detectionClass: DetectionClass,
     val confidence: Float,
-    val occurredAtEpochMilliseconds: Long,
+    val capturedAtEpochMilliseconds: Long,
     val location: GeoPoint,
+    val boundingBox: BoundingBox,
+    val trackingId: String? = null,
+    val cameraId: String,
+    val frameId: String,
     val evidence: List<EvidenceReference> = emptyList(),
-    val attributes: Map<String, String> = emptyMap(),
+    val metadata: Map<String, String> = emptyMap(),
 ) {
     init {
-        require(id.isNotBlank()) { "Event id cannot be blank" }
-        require(deviceId.isNotBlank()) { "Device id cannot be blank" }
+        require(id.isNotBlank()) { "Observation id cannot be blank" }
         require(confidence in 0f..1f) { "Confidence must be between 0 and 1" }
+        require(capturedAtEpochMilliseconds >= 0) { "Capture timestamp cannot be negative" }
+        require(cameraId.isNotBlank()) { "Camera id cannot be blank" }
+        require(frameId.isNotBlank()) { "Frame id cannot be blank" }
     }
 }
+
+private fun String.normalizedLabel(): String = trim().lowercase().replace(' ', '_')

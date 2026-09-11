@@ -19,9 +19,10 @@ CameraX frame source
     -> model-specific detector
     -> confidence and label validation
     -> GPS location
+    -> raw object-detection observations
     -> JPEG evidence storage
-    -> durable on-device JSON event queue
-    -> idempotent HTTP event upload
+    -> durable on-device JSON observation queue
+    -> idempotent HTTP batch ingestion
 ```
 
 `AndroidEdgeRuntimeFactory` assembles this workflow from the Android adapters. The detector is injected through `AndroidFrameDetector`; exported models come from `../sapseed-models`.
@@ -49,14 +50,14 @@ Each **Discover** hit or manual URL **adds** a tile to a two-column grid instead
 
 The phone-specific fast path uses CameraX RGBA output with physical output rotation, an ARM64/NEON-friendly C++ letterbox/normalization step, and LiteRT's OpenCL GPU delegate in sustained-speed mode. Compiled GPU kernels are cached by model digest under the app code cache. The APK is intentionally restricted to `arm64-v8a`.
 
-## Offline event retention
+## Offline observation retention
 
-Each validated event is committed to app-private storage as:
+Each validated raw observation is committed to app-private storage as:
 
 - metadata in an atomic JSON queue
 - one JPEG photo at quality 85
 
-The default queue retains the newest **60 events/photos**, with an additional **60 MiB evidence cap**. Whichever limit is reached first evicts the oldest event and deletes its photo. Successful or permanently rejected uploads also remove both metadata and photo. Network failures and retryable HTTP responses leave both on disk.
+The default queue retains the newest **60 observations/photos**, with an additional **60 MiB evidence cap**. Whichever limit is reached first evicts the oldest observation and deletes its photo. Successful, duplicate, or permanently rejected ingestion results remove only the corresponding queue entries and photos. Network failures and retryable HTTP responses leave them on disk.
 
 Approximate JPEG usage varies with detail and noise:
 
@@ -66,7 +67,9 @@ Approximate JPEG usage varies with detail and noise:
 | 1280×720 | 150–500 KiB | 9–30 MiB |
 | 1920×1080 | 400–1,200 KiB | 24–70 MiB |
 
-The hard byte cap protects storage when noisy or high-resolution frames compress poorly. Upload requests are multipart form data with an `application/json` `metadata` part and image-only `photo` parts; video evidence is not supported.
+The hard byte cap protects storage when noisy or high-resolution frames compress poorly. Pending metadata is uploaded in JSON batches of up to 100 observations to Sapsii's `/v1/ingestion/batches` contract. Each item keeps its original client ID across retries, and the edge removes entries according to the API's per-item accepted/duplicate/rejected result.
+
+Before metadata ingestion, each pending photo is reserved through `/v1/evidence/reservations`, uploaded with the returned signed `PUT`, completed through `/v1/evidence/:evidenceId/complete`, and referenced from its observation's `evidenceIds`. Captured evidence is encoded in the same upright orientation used by inference, including CameraX and decoded network-camera RGBA frames, so normalized bounding boxes align with the displayed JPEG. The wire model contains raw detector classes only. Missing infrastructure, congestion, vulnerable-pedestrian situations, rash driving, hit-and-run, and OCR are not inferred from the current YOLO detections.
 
 ## Deliberately not included
 

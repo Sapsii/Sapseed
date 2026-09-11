@@ -9,6 +9,8 @@
 **/build/
 !src/**/build/
 local.properties
+.env
+**/.env
 captures/
 sapseed-edge/device-benchmarks/
 .externalNativeBuild/
