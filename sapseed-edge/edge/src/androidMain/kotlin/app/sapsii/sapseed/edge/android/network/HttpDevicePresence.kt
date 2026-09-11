@@ -4,10 +4,12 @@ import app.sapsii.sapseed.edge.contract.DevicePresenceReporter
 import app.sapsii.sapseed.edge.contract.PresenceResult
 import java.net.HttpURLConnection
 import java.net.URL
+import org.json.JSONObject
 
 class HttpDevicePresence(
     private val ingestionEndpoint: URL,
     private val authorizationHeader: () -> String,
+    private val instanceExternalId: String? = null,
     private val connectTimeoutMilliseconds: Int = 5_000,
     private val readTimeoutMilliseconds: Int = 10_000,
 ) : DevicePresenceReporter {
@@ -21,7 +23,9 @@ class HttpDevicePresence(
             connection.setRequestProperty("Accept", "application/json")
             connection.setRequestProperty("Content-Type", "application/json")
             connection.setRequestProperty("Authorization", authorizationHeader())
-            val body = "{}".toByteArray(Charsets.UTF_8)
+            val payload = JSONObject().put("schemaVersion", 1)
+            instanceExternalId?.let { payload.put("instanceId", it) }
+            val body = payload.toString().toByteArray(Charsets.UTF_8)
             connection.setFixedLengthStreamingMode(body.size)
             connection.outputStream.use { it.write(body) }
 

@@ -23,6 +23,7 @@ object AndroidEdgeRuntimeFactory {
         authorizationHeader: () -> String,
         softwareVersion: String,
         modelVersion: String,
+        instanceExternalId: String? = null,
         cameraId: String = "primary",
         softwareName: String = "sapseed-edge-android",
         modelName: String = "yolo11n",
@@ -56,6 +57,7 @@ object AndroidEdgeRuntimeFactory {
             devicePresenceReporter = HttpDevicePresence(
                 ingestionEndpoint = ingestionEndpoint,
                 authorizationHeader = authorizationHeader,
+                instanceExternalId = instanceExternalId,
             ),
         )
     }

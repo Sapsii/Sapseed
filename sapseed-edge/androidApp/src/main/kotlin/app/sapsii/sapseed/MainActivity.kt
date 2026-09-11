@@ -53,7 +53,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
-    /** `<device name from About phone>-<imei hash 6>`, the id the platform provisions. */
     private val deviceExternalId: String by lazy {
         AndroidDeviceIdentity.externalId(applicationContext)
     }
@@ -379,6 +378,7 @@ class MainActivity : ComponentActivity() {
                     authorizationHeader = { authorization },
                     softwareVersion = BuildConfig.VERSION_NAME,
                     modelVersion = "sapseed",
+                    instanceExternalId = deviceExternalId,
                     modelRuntime = selectedRuntime.displayName,
                     cameraId = "builtin-primary",
                     minimumConfidence = LIVE_CONFIDENCE_THRESHOLD,
@@ -702,7 +702,7 @@ class MainActivity : ComponentActivity() {
         private const val UPLOAD_INTERVAL_MS = 2_000L
         private const val OBSERVATION_INTERVAL_MS = 2_000L
 
-        private const val PRESENCE_INTERVAL_MS = 60_000L
+        private const val PRESENCE_INTERVAL_MS = 15_000L
         private const val LIVE_CONFIDENCE_THRESHOLD = 0.25f
         private val BROADCAST_RESOLUTION = Size(640, 480)
     }
