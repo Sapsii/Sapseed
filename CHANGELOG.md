@@ -1,3 +1,16 @@
+## [1.1.0](https://github.com/ProjektArgus/Sapseed/compare/v1.0.0...v1.1.0) (2026-09-11)
+
+### Bug Fixes
+
+* **edge:** preserve API path prefixes ([792507b](https://github.com/ProjektArgus/Sapseed/commit/792507b4dc188af39533d3ad7ca23d20b290306d))
+* **models:** validate packaged inference assets ([ce5524a](https://github.com/ProjektArgus/Sapseed/commit/ce5524aa7e1a749d1a2ae484c9db223175e65ff2))
+
+### New Features
+
+* **app:** show a stable edge-unit identifier ([af40121](https://github.com/ProjektArgus/Sapseed/commit/af401212545cfac8b52fb0b77f822ebfdd9005f8))
+* **edge:** deliver authenticated camera observations ([17c1b70](https://github.com/ProjektArgus/Sapseed/commit/17c1b7057ba9fee48763e6a2d40844bdf09a7f28))
+* **edge:** report device lifecycle ([094fff5](https://github.com/ProjektArgus/Sapseed/commit/094fff5a24a51d46dd1d4f8f6e73e3b9ecb70c84))
+
 ## [1.1.0-dev.1](https://github.com/ProjektArgus/Sapseed/compare/v1.0.0...v1.1.0-dev.1) (2026-09-11)
 
 ### Bug Fixes
