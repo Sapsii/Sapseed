@@ -163,7 +163,7 @@ class HttpEventUploader(
         connection.setRequestProperty("Authorization", authorizationHeader())
     }
 
-    private fun apiUrl(path: String): URL = URL(endpoint.protocol, endpoint.host, endpoint.port, path)
+    private fun apiUrl(path: String): URL = apiUrl(endpoint, path)
 
     private fun createBatchJson(
         batchId: String,
