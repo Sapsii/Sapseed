@@ -19,9 +19,10 @@ CameraX frame source
     -> model-specific detector
     -> confidence and label validation
     -> GPS location
+    -> raw object-detection observations
     -> JPEG evidence storage
-    -> durable on-device JSON event queue
-    -> idempotent HTTP event upload
+    -> durable on-device JSON observation queue
+    -> idempotent HTTP batch ingestion
 ```
 
 `AndroidEdgeRuntimeFactory` assembles this workflow from the Android adapters. The detector is injected through `AndroidFrameDetector`; exported models come from `../sapseed-models`.
@@ -49,14 +50,14 @@ Each **Discover** hit or manual URL **adds** a tile to a two-column grid instead
 
 The phone-specific fast path uses CameraX RGBA output with physical output rotation, an ARM64/NEON-friendly C++ letterbox/normalization step, and LiteRT's OpenCL GPU delegate in sustained-speed mode. Compiled GPU kernels are cached by model digest under the app code cache. The APK is intentionally restricted to `arm64-v8a`.
 
-## Offline event retention
+## Offline observation retention
 
-Each validated event is committed to app-private storage as:
+Each validated raw observation is committed to app-private storage as:
 
 - metadata in an atomic JSON queue
 - one JPEG photo at quality 85
 
-The default queue retains the newest **60 events/photos**, with an additional **60 MiB evidence cap**. Whichever limit is reached first evicts the oldest event and deletes its photo. Successful or permanently rejected uploads also remove both metadata and photo. Network failures and retryable HTTP responses leave both on disk.
+The default queue retains the newest **60 observations/photos**, with an additional **60 MiB evidence cap**. Whichever limit is reached first evicts the oldest observation and deletes its photo. Successful, duplicate, or permanently rejected ingestion results remove only the corresponding queue entries and photos. Network failures and retryable HTTP responses leave them on disk.
 
 Approximate JPEG usage varies with detail and noise:
 
@@ -66,7 +67,28 @@ Approximate JPEG usage varies with detail and noise:
 | 1280×720 | 150–500 KiB | 9–30 MiB |
 | 1920×1080 | 400–1,200 KiB | 24–70 MiB |
 
-The hard byte cap protects storage when noisy or high-resolution frames compress poorly. Upload requests are multipart form data with an `application/json` `metadata` part and image-only `photo` parts; video evidence is not supported.
+The hard byte cap protects storage when noisy or high-resolution frames compress poorly. Pending metadata is uploaded in JSON batches of up to 100 observations to Sapsii's `/v1/ingestion/batches` contract. Each item keeps its original client ID across retries, and the edge removes entries according to the API's per-item accepted/duplicate/rejected result.
+
+Each unit reports itself as `DEVICE_NAME-IMEI_HASH{6}`. `DEVICE_NAME` is the name Android shows under Settings -> About phone, and the hash is the first six hex digits of a SHA-256 digest of the unit's IMEI. Because reading the IMEI needs `READ_PHONE_STATE` and is restricted to privileged callers from Android 10 onwards, the digest falls back to `Settings.Secure.ANDROID_ID` and then to the build fingerprint. Live detection shows the id in its status line so an operator can read it off the device without a debugger.
+
+Authentication does not depend on that id. A unit authenticates with the `Device <credentialId>.<secret>` header baked into `SAPSEED_DEVICE_AUTHORIZATION` at build time, so any device that installs a provisioned build operates as an edge unit with nothing to configure:
+
+```shell
+SAPSEED_API_URL=https://argus.imxone.com/api
+SAPSEED_DEVICE_AUTHORIZATION=Device <credential-id>.<secret>
+```
+
+Both are read from the environment or `sapseed-edge/.env`. Because they are compiled into the APK, installing one build on several units makes them the same platform device: ingestion, evidence, and presence all work, but they share one device row, so independent-device issue confirmation cannot rise above one and the fleet view shows a single moving marker. Provision one credential per unit when that matters.
+
+The release workflow passes both values so a downloaded APK uploads without setup, and `prepare-release.sh` fails the release when either is missing rather than shipping an APK that silently never uploads.
+
+## Presence and deactivation
+
+Presence is inferred by the platform from traffic, and the dashboard marks a device offline after fifteen minutes of silence. The app therefore posts to `/v1/devices/heartbeat` once a minute whenever live detection runs, so a unit that is parked and detecting nothing stays online.
+
+A `401` or `403` from either ingestion or heartbeat means the unit was deactivated or its secret was rotated. That is treated as terminal: uploads stop, the pending queue is kept, and the status line shows `CREDENTIAL REJECTED` instead of retrying a request that can never succeed.
+
+Before metadata ingestion, each pending photo is reserved through `/v1/evidence/reservations`, uploaded with the returned signed `PUT`, completed through `/v1/evidence/:evidenceId/complete`, and referenced from its observation's `evidenceIds`. Captured evidence is encoded in the same upright orientation used by inference, including CameraX and decoded network-camera RGBA frames, so normalized bounding boxes align with the displayed JPEG. The wire model contains raw detector classes only. Missing infrastructure, congestion, vulnerable-pedestrian situations, rash driving, hit-and-run, and OCR are not inferred from the current YOLO detections.
 
 ## Deliberately not included
 

@@ -3,7 +3,6 @@ package app.sapsii.sapseed.edge.android.inference
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.RectF
@@ -14,6 +13,7 @@ import ai.onnxruntime.OrtSession
 import androidx.camera.core.ImageProxy
 import app.sapsii.sapseed.edge.android.camera.AndroidVideoFrame
 import app.sapsii.sapseed.edge.android.camera.RgbaVideoFrame
+import app.sapsii.sapseed.edge.android.camera.toUprightBitmap
 import app.sapsii.sapseed.edge.model.Detection
 import kotlin.math.max
 import kotlin.math.min
@@ -121,7 +121,7 @@ class Yolo11OnnxDetector(
     )
 
     private fun preprocessYuv(image: ImageProxy, rotationDegrees: Int): PreparedInput {
-        val source = image.toRgbBitmap(rotationDegrees)
+        val source = image.toUprightBitmap(rotationDegrees)
         try {
             val scale = min(inputSize.toFloat() / source.width, inputSize.toFloat() / source.height)
             val scaledWidth = (source.width * scale).toInt()
@@ -169,53 +169,4 @@ private data class PreparedInput(
     val values: java.nio.FloatBuffer,
     val transform: LetterboxTransform,
 )
-
-private fun ImageProxy.toRgbBitmap(rotationDegrees: Int): Bitmap {
-    require(format == android.graphics.ImageFormat.YUV_420_888) {
-        "Expected YUV_420_888 camera input, received format $format"
-    }
-    val yPlane = planes[0]
-    val uPlane = planes[1]
-    val vPlane = planes[2]
-    val yBuffer = yPlane.buffer.duplicate()
-    val uBuffer = uPlane.buffer.duplicate()
-    val vBuffer = vPlane.buffer.duplicate()
-    val yStart = yBuffer.position()
-    val uStart = uBuffer.position()
-    val vStart = vBuffer.position()
-    val colors = IntArray(width * height)
-
-    repeat(height) { row ->
-        repeat(width) { column ->
-            val y = (yBuffer.get(yStart + row * yPlane.rowStride + column * yPlane.pixelStride).toInt() and 0xff) - 16
-            val chromaRow = row / 2
-            val chromaColumn = column / 2
-            val u = (uBuffer.get(uStart + chromaRow * uPlane.rowStride + chromaColumn * uPlane.pixelStride)
-                .toInt() and 0xff) - 128
-            val v = (vBuffer.get(vStart + chromaRow * vPlane.rowStride + chromaColumn * vPlane.pixelStride)
-                .toInt() and 0xff) - 128
-            val luminance = max(0, y)
-            val red = ((298 * luminance + 409 * v + 128) shr 8).coerceIn(0, 255)
-            val green = ((298 * luminance - 100 * u - 208 * v + 128) shr 8).coerceIn(0, 255)
-            val blue = ((298 * luminance + 516 * u + 128) shr 8).coerceIn(0, 255)
-            colors[row * width + column] = Color.rgb(red, green, blue)
-        }
-    }
-
-    val unrotated = Bitmap.createBitmap(colors, width, height, Bitmap.Config.ARGB_8888)
-    if (rotationDegrees == 0) return unrotated
-    return try {
-        Bitmap.createBitmap(
-            unrotated,
-            0,
-            0,
-            unrotated.width,
-            unrotated.height,
-            Matrix().apply { postRotate(rotationDegrees.toFloat()) },
-            true,
-        )
-    } finally {
-        unrotated.recycle()
-    }
-}
 

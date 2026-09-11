@@ -8,6 +8,8 @@ required_variables=(
   ANDROID_KEY_ALIAS
   ANDROID_KEY_PASSWORD
   GITHUB_RUN_NUMBER
+  SAPSEED_API_URL
+  SAPSEED_DEVICE_AUTHORIZATION
 )
 for variable in "${required_variables[@]}"; do
   if [[ -z "${!variable:-}" ]]; then
@@ -23,8 +25,10 @@ fi
 export SAPSEED_VERSION_NAME="$version"
 export SAPSEED_VERSION_CODE="$GITHUB_RUN_NUMBER"
 
+python .github/scripts/validate-model-assets.py
+
 pushd sapseed-edge >/dev/null
-./gradlew :androidApp:assembleRelease --console=plain
+./gradlew :edge:testAndroidHostTest :androidApp:assembleRelease --console=plain
 popd >/dev/null
 
 source_apk="sapseed-edge/androidApp/build/outputs/apk/release/androidApp-release.apk"
@@ -32,6 +36,7 @@ if [[ ! -f "$source_apk" ]]; then
   echo "Signed release APK was not produced: $source_apk" >&2
   exit 1
 fi
+python .github/scripts/validate-model-assets.py --apk "$source_apk"
 
 unexpected_abis=$(unzip -Z1 "$source_apk" | grep '^lib/' | grep -v '^lib/arm64-v8a/' || true)
 if [[ -n "$unexpected_abis" ]]; then

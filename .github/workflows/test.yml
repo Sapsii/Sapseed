@@ -13,8 +13,10 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout models from Git LFS
         uses: actions/checkout@v7
+        with:
+          lfs: true
 
       - name: Set up Java
         uses: actions/setup-java@v5
@@ -25,8 +27,10 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v5
 
-      - name: Compile Python scripts
-        run: python -m compileall -q sapseed-models/scripts
+      - name: Compile Python scripts and validate model assets
+        run: |
+          python -m compileall -q sapseed-models/scripts .github/scripts
+          python .github/scripts/validate-model-assets.py
 
       - name: Build and test Android
         working-directory: sapseed-edge

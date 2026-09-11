@@ -2,12 +2,12 @@ package app.sapsii.sapseed.edge
 
 import app.sapsii.sapseed.edge.model.BoundingBox
 import app.sapsii.sapseed.edge.model.Detection
+import app.sapsii.sapseed.edge.model.DetectionClass
 import app.sapsii.sapseed.edge.model.EvidenceReference
-import app.sapsii.sapseed.edge.model.EventType
 import app.sapsii.sapseed.edge.model.GeoPoint
-import app.sapsii.sapseed.edge.model.UrbanEvent
+import app.sapsii.sapseed.edge.model.UrbanObservation
 import app.sapsii.sapseed.edge.model.VideoFrame
-import app.sapsii.sapseed.edge.pipeline.DetectionEventFactory
+import app.sapsii.sapseed.edge.pipeline.DetectionObservationFactory
 import app.sapsii.sapseed.edge.storage.EventRetentionPolicy
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -36,59 +36,63 @@ class EdgeModelsTest {
     }
 
     @Test
-    fun eventFactoryFiltersAndMapsModelLabels() {
-        val factory = DetectionEventFactory(
-            deviceId = "prototype-phone",
-            eventTypesByLabel = mapOf("pothole" to EventType.POTHOLE),
-            idFactory = { "event-1" },
+    fun observationFactoryPreservesRawDetectionClasses() {
+        var nextId = 0
+        val factory = DetectionObservationFactory(
+            cameraId = "front",
+            idFactory = { "observation-${++nextId}" },
             minimumConfidence = 0.7f,
         )
         val bounds = BoundingBox(0.1f, 0.2f, 0.4f, 0.6f)
 
-        val events = factory.createEvents(
+        val observations = factory.createObservations(
             detections = listOf(
                 Detection("Pothole", 0.9f, bounds),
                 Detection("pothole", 0.5f, bounds),
                 Detection("car", 0.99f, bounds),
+                Detection("missing_zebra_crossing", 0.99f, bounds),
             ),
             frame = TestFrame,
             location = GeoPoint(28.6139, 77.2090),
         )
 
-        assertEquals(1, events.size)
-        assertEquals(EventType.POTHOLE, events.single().type)
+        assertEquals(listOf(DetectionClass.POTHOLE, DetectionClass.CAR), observations.map { it.detectionClass })
+        assertEquals(listOf("front", "front"), observations.map { it.cameraId })
+        assertEquals(listOf("frame-1", "frame-1"), observations.map { it.frameId })
     }
 
     @Test
-    fun retentionEvictsOldestEventBeyondCountLimit() {
-        val events = mutableListOf(testEvent("1", 10), testEvent("2", 10), testEvent("3", 10))
+    fun retentionEvictsOldestObservationBeyondCountLimit() {
+        val observations = mutableListOf(testObservation("1", 10), testObservation("2", 10), testObservation("3", 10))
 
         val evicted = EventRetentionPolicy(maxEvents = 2, maxEvidenceBytes = 1_000)
-            .evictOverflow(events)
+            .evictOverflow(observations)
 
-        assertEquals(listOf("1"), evicted.map(UrbanEvent::id))
-        assertEquals(listOf("2", "3"), events.map(UrbanEvent::id))
+        assertEquals(listOf("1"), evicted.map(UrbanObservation::id))
+        assertEquals(listOf("2", "3"), observations.map(UrbanObservation::id))
     }
 
     @Test
-    fun retentionEvictsOldestEventBeyondByteLimit() {
-        val events = mutableListOf(testEvent("1", 60), testEvent("2", 60))
+    fun retentionEvictsOldestObservationBeyondByteLimit() {
+        val observations = mutableListOf(testObservation("1", 60), testObservation("2", 60))
 
         val evicted = EventRetentionPolicy(maxEvents = 60, maxEvidenceBytes = 100)
-            .evictOverflow(events)
+            .evictOverflow(observations)
 
-        assertEquals(listOf("1"), evicted.map(UrbanEvent::id))
-        assertEquals(60, events.single().evidence.single().sizeBytes)
+        assertEquals(listOf("1"), evicted.map(UrbanObservation::id))
+        assertEquals(60, observations.single().evidence.single().sizeBytes)
     }
 }
 
-private fun testEvent(id: String, evidenceBytes: Long) = UrbanEvent(
+private fun testObservation(id: String, evidenceBytes: Long) = UrbanObservation(
     id = id,
-    deviceId = "test-device",
-    type = EventType.POTHOLE,
+    detectionClass = DetectionClass.POTHOLE,
     confidence = 0.9f,
-    occurredAtEpochMilliseconds = id.toLong(),
+    capturedAtEpochMilliseconds = id.toLong(),
     location = GeoPoint(0.0, 0.0),
+    boundingBox = BoundingBox(0.1f, 0.2f, 0.4f, 0.6f),
+    cameraId = "front",
+    frameId = "frame-$id",
     evidence = listOf(EvidenceReference("$id.jpg", "image/jpeg", evidenceBytes)),
 )
 
