@@ -36,3 +36,4 @@ sapseed-models/artifacts/
 *.torchscript
 
 node_modules/
+.semantic-release-created

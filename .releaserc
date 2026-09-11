@@ -39,12 +39,6 @@
       { "changelogFile": "CHANGELOG.md" }
     ],
     [
-      "@semantic-release/exec",
-      {
-        "prepareCmd": "bash .github/scripts/prepare-release.sh ${nextRelease.version}"
-      }
-    ],
-    [
       "@semantic-release/git",
       {
         "assets": ["CHANGELOG.md"],
@@ -63,6 +57,13 @@
       {
         "backmergeBranches": [{ "from": "main", "to": "dev" }],
         "clearWorkspace": true
+      }
+    ],
+    [
+      "@semantic-release/exec",
+      {
+        "prepareCmd": "touch .semantic-release-created && bash .github/scripts/prepare-release.sh ${nextRelease.version}",
+        "successCmd": "touch .semantic-release-created"
       }
     ]
   ]

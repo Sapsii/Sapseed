@@ -26,7 +26,7 @@ export SAPSEED_VERSION_NAME="$version"
 export SAPSEED_VERSION_CODE="$GITHUB_RUN_NUMBER"
 
 pushd sapseed-edge >/dev/null
-./gradlew :androidApp:assembleRelease --console=plain
+./gradlew :edge:testAndroidHostTest :androidApp:assembleRelease --console=plain
 popd >/dev/null
 
 source_apk="sapseed-edge/androidApp/build/outputs/apk/release/androidApp-release.apk"
