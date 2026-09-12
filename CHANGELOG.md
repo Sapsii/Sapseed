@@ -1,3 +1,13 @@
+## [1.3.0](https://github.com/ProjektArgus/Sapseed/compare/v1.2.0...v1.3.0) (2026-09-12)
+
+### Bug Fixes
+
+* **edge:** store one capture per frame ([4d455fb](https://github.com/ProjektArgus/Sapseed/commit/4d455fb0e1a227b7caa99555c7a6762024125847))
+
+### New Features
+
+* **edge:** report this unit's own position ([abe2a81](https://github.com/ProjektArgus/Sapseed/commit/abe2a81b4516ebf9694541420898b37cad058865))
+
 ## [1.3.0-dev.1](https://github.com/ProjektArgus/Sapseed/compare/v1.2.0...v1.3.0-dev.1) (2026-09-12)
 
 ### Bug Fixes
