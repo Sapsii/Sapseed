@@ -1,3 +1,9 @@
+## [1.2.0](https://github.com/ProjektArgus/Sapseed/compare/v1.1.0...v1.2.0) (2026-09-12)
+
+### New Features
+
+* **edge:** report physical instance identity ([686bd26](https://github.com/ProjektArgus/Sapseed/commit/686bd26f2bbde89b517a5f1f86607ad09975b498))
+
 ## [1.2.0-dev.1](https://github.com/ProjektArgus/Sapseed/compare/v1.1.0...v1.2.0-dev.1) (2026-09-11)
 
 ### New Features
