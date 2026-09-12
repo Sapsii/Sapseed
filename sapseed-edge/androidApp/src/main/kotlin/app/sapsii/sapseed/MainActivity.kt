@@ -457,7 +457,9 @@ class MainActivity : ComponentActivity() {
                 }
                 if (now >= nextPresenceAt) {
                     try {
-                        if (mobilePipeline?.reportPresence() is PresenceResult.CredentialRejected) {
+                        // A reported fix refreshes presence too, so only units without one need a heartbeat.
+                        val reported = mobilePipeline?.reportPosition() == true
+                        if (!reported && mobilePipeline?.reportPresence() is PresenceResult.CredentialRejected) {
                             Log.w(LOG_TAG, "Heartbeat rejected: this unit was deactivated or its secret was rotated")
                         }
                     } catch (error: Throwable) {

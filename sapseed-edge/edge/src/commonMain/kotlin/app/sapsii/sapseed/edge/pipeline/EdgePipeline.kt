@@ -1,6 +1,7 @@
 package app.sapsii.sapseed.edge.pipeline
 
 import app.sapsii.sapseed.edge.contract.BatchUploadResult
+import app.sapsii.sapseed.edge.contract.DeviceLocationReporter
 import app.sapsii.sapseed.edge.contract.DevicePresenceReporter
 import app.sapsii.sapseed.edge.contract.EvidenceStore
 import app.sapsii.sapseed.edge.contract.FrameSource
@@ -25,6 +26,7 @@ class EdgePipeline(
     private val observationQueue: ObservationQueue,
     private val observationUploader: ObservationUploader,
     private val devicePresenceReporter: DevicePresenceReporter? = null,
+    private val deviceLocationReporter: DeviceLocationReporter? = null,
 ) {
     var credentialRejected: Boolean = false
         private set
@@ -118,6 +120,18 @@ class EdgePipeline(
         val result = reporter.reportAlive()
         if (result is PresenceResult.CredentialRejected) credentialRejected = true
         return result
+    }
+
+    /**
+     * Sends this unit's own fix, which also refreshes its presence. Returns false when there is no
+     * fix to send or the request failed, so the caller can fall back to [reportPresence].
+     */
+    suspend fun reportPosition(): Boolean {
+        val reporter = deviceLocationReporter ?: return false
+        val location = locationSource.currentLocation() ?: return false
+        val result = reporter.reportPosition(location)
+        if (result is PresenceResult.CredentialRejected) credentialRejected = true
+        return result is PresenceResult.Alive
     }
 }
 

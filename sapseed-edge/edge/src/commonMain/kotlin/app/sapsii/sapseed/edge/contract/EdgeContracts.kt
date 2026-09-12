@@ -79,3 +79,11 @@ sealed interface PresenceResult {
 interface DevicePresenceReporter {
     suspend fun reportAlive(): PresenceResult
 }
+
+/**
+ * Sends this unit's own GPS fix. Reporting a position also refreshes presence, so a unit with
+ * a fix does not need a separate heartbeat.
+ */
+interface DeviceLocationReporter {
+    suspend fun reportPosition(location: GeoPoint): PresenceResult
+}

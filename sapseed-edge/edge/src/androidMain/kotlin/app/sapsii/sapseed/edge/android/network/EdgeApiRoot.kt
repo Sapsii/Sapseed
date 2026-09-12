@@ -7,6 +7,7 @@ import java.util.Locale
 import java.util.TimeZone
 
 internal const val INGESTION_BATCH_PATH = "/v1/ingestion/batches"
+internal const val TELEMETRY_POSITION_PATH = "/v1/telemetry/position"
 internal const val DEVICE_HEARTBEAT_PATH = "/v1/devices/heartbeat"
 
 internal fun apiRoot(ingestionEndpoint: URL): String =
