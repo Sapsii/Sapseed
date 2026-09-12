@@ -152,7 +152,7 @@ class EdgePipelineCredentialTest {
                 ) = emptyList<UrbanObservation>()
             },
             evidenceStore = object : EvidenceStore {
-                override suspend fun saveImage(observationId: String, frame: VideoFrame) =
+                override suspend fun saveImage(frame: VideoFrame) =
                     EvidenceReference(localId = "evidence-1", mediaType = "image/jpeg", sizeBytes = 1)
                 override suspend fun read(reference: EvidenceReference) = byteArrayOf()
                 override suspend fun delete(reference: EvidenceReference) = Unit
@@ -161,6 +161,7 @@ class EdgePipelineCredentialTest {
                 override suspend fun enqueue(observation: UrbanObservation) = emptyList<UrbanObservation>()
                 override suspend fun pending(limit: Int) = listOf(observation)
                 override suspend fun remove(observationId: String) = Unit
+                override suspend fun referencedEvidenceIds() = emptySet<String>()
                 override suspend fun stats() = ObservationQueueStats(1, 1)
             },
             observationUploader = uploader,

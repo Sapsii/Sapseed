@@ -1,5 +1,6 @@
 package app.sapsii.sapseed.edge.storage
 
+import app.sapsii.sapseed.edge.model.EvidenceReference
 import app.sapsii.sapseed.edge.model.UrbanObservation
 
 class EventRetentionPolicy(
@@ -14,11 +15,8 @@ class EventRetentionPolicy(
     /** Mutates an oldest-first list until both limits are satisfied. */
     fun evictOverflow(observations: MutableList<UrbanObservation>): List<UrbanObservation> {
         val evicted = mutableListOf<UrbanObservation>()
-        var evidenceBytes = observations.sumOf(UrbanObservation::evidenceSizeBytes)
-        while (observations.size > maxEvents || evidenceBytes > maxEvidenceBytes) {
-            val oldest = observations.removeAt(0)
-            evidenceBytes -= oldest.evidenceSizeBytes()
-            evicted += oldest
+        while (observations.size > maxEvents || evidenceBytes(observations) > maxEvidenceBytes) {
+            evicted += observations.removeAt(0)
         }
         return evicted
     }
@@ -30,3 +28,13 @@ class EventRetentionPolicy(
 }
 
 fun UrbanObservation.evidenceSizeBytes(): Long = evidence.sumOf { it.sizeBytes }
+
+/**
+ * Bytes actually held on disk. Observations from one frame share an image, so it is counted
+ * once rather than once per referencing observation.
+ */
+fun evidenceBytes(observations: List<UrbanObservation>): Long =
+    observations
+        .flatMap(UrbanObservation::evidence)
+        .distinctBy(EvidenceReference::localId)
+        .sumOf(EvidenceReference::sizeBytes)

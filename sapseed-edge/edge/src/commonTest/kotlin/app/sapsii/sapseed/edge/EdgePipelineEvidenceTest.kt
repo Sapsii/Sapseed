@@ -46,8 +46,7 @@ class EdgePipelineEvidenceTest {
                 idFactory = { "observation-1" },
             ),
             evidenceStore = object : EvidenceStore {
-                override suspend fun saveImage(observationId: String, frame: VideoFrame): EvidenceReference {
-                    assertEquals("observation-1", observationId)
+                override suspend fun saveImage(frame: VideoFrame): EvidenceReference {
                     savedFrame = frame
                     return evidence
                 }
@@ -61,6 +60,7 @@ class EdgePipelineEvidenceTest {
                 }
                 override suspend fun pending(limit: Int) = emptyList<UrbanObservation>()
                 override suspend fun remove(observationId: String) = Unit
+                override suspend fun referencedEvidenceIds() = emptySet<String>()
                 override suspend fun stats() = ObservationQueueStats(queued?.let { 1 } ?: 0, queued?.evidence?.sumOf { it.sizeBytes } ?: 0)
             },
             observationUploader = object : ObservationUploader {

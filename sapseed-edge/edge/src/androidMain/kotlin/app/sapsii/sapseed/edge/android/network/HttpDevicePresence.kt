@@ -14,7 +14,7 @@ class HttpDevicePresence(
     private val readTimeoutMilliseconds: Int = 10_000,
 ) : DevicePresenceReporter {
     override suspend fun reportAlive(): PresenceResult {
-        val connection = apiUrl(ingestionEndpoint, "/v1/devices/heartbeat").openConnection() as HttpURLConnection
+        val connection = apiUrl(ingestionEndpoint, DEVICE_HEARTBEAT_PATH).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "POST"
             connection.doOutput = true

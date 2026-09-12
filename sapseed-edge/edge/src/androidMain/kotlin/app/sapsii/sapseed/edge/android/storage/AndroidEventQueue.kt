@@ -10,7 +10,7 @@ import app.sapsii.sapseed.edge.model.EvidenceReference
 import app.sapsii.sapseed.edge.model.GeoPoint
 import app.sapsii.sapseed.edge.model.UrbanObservation
 import app.sapsii.sapseed.edge.storage.EventRetentionPolicy
-import app.sapsii.sapseed.edge.storage.evidenceSizeBytes
+import app.sapsii.sapseed.edge.storage.evidenceBytes
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -55,12 +55,20 @@ class AndroidEventQueue(
         mutate { observations -> observations.removeAll { it.id == observationId } }
     }
 
+    override suspend fun referencedEvidenceIds(): Set<String> = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            readObservations().flatMapTo(mutableSetOf<String>()) { observation ->
+                observation.evidence.map(EvidenceReference::localId)
+            }
+        }
+    }
+
     override suspend fun stats(): ObservationQueueStats = mutex.withLock {
         withContext(Dispatchers.IO) {
             val observations = readObservations()
             ObservationQueueStats(
                 observationCount = observations.size,
-                evidenceBytes = observations.sumOf(UrbanObservation::evidenceSizeBytes),
+                evidenceBytes = evidenceBytes(observations),
             )
         }
     }

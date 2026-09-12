@@ -12,6 +12,7 @@ import app.sapsii.sapseed.edge.contract.ObservationUploader
 import app.sapsii.sapseed.edge.contract.PresenceResult
 import app.sapsii.sapseed.edge.contract.UploadItemResult
 import app.sapsii.sapseed.edge.model.Detection
+import app.sapsii.sapseed.edge.model.EvidenceReference
 import app.sapsii.sapseed.edge.model.UrbanObservation
 import app.sapsii.sapseed.edge.model.VideoFrame
 
@@ -42,11 +43,16 @@ class EdgePipeline(
         if (detections.isEmpty()) return 0
         val location = locationSource.currentLocation() ?: return 0
         val observations = observationFactory.createObservations(detections, frame, location)
-        observations.forEach { observation ->
-            val evidence = evidenceStore.saveImage(observation.id, frame)
-            val evicted = observationQueue.enqueue(observation.copy(evidence = observation.evidence + evidence))
-            evicted.flatMap(UrbanObservation::evidence).forEach { evidenceStore.delete(it) }
+        if (observations.isEmpty()) return 0
+
+        // One frame is one capture: every detection in it references the same image, so a
+        // multi-detection frame uploads a single JPEG instead of one per detection.
+        val frameEvidence = evidenceStore.saveImage(frame)
+        val evicted = mutableListOf<UrbanObservation>()
+        for (observation in observations) {
+            evicted += observationQueue.enqueue(observation.copy(evidence = observation.evidence + frameEvidence))
         }
+        deleteUnreferencedEvidence(evicted.flatMap(UrbanObservation::evidence))
         return observations.size
     }
 
@@ -65,23 +71,21 @@ class EdgePipeline(
             }
             BatchUploadResult.RetryLater -> UploadBatchSummary(0, 0, retryScheduled = true)
             is BatchUploadResult.Completed -> {
-                var accepted = 0
                 var rejected = 0
                 var retryScheduled = false
+                val finished = mutableListOf<UrbanObservation>()
                 pending.forEach { observation ->
                     when (batch.resultsByObservationId[observation.id]) {
-                        UploadItemResult.Accepted -> {
-                            removeObservationAndEvidence(observation)
-                            accepted++
-                        }
+                        UploadItemResult.Accepted -> finished += observation
                         is UploadItemResult.Rejected -> {
-                            removeObservationAndEvidence(observation)
+                            finished += observation
                             rejected++
                         }
                         null -> retryScheduled = true
                     }
                 }
-                UploadBatchSummary(accepted, rejected, retryScheduled)
+                removeObservations(finished)
+                UploadBatchSummary(finished.size - rejected, rejected, retryScheduled)
             }
         }
     }
@@ -90,9 +94,23 @@ class EdgePipeline(
         frameSource.close()
     }
 
-    private suspend fun removeObservationAndEvidence(observation: UrbanObservation) {
-        observation.evidence.forEach { evidenceStore.delete(it) }
-        observationQueue.remove(observation.id)
+    private suspend fun removeObservations(observations: List<UrbanObservation>) {
+        if (observations.isEmpty()) return
+        observations.forEach { observationQueue.remove(it.id) }
+        deleteUnreferencedEvidence(observations.flatMap(UrbanObservation::evidence))
+    }
+
+    /**
+     * Removes capture files no queued observation references any more. Observations from one
+     * frame share an image, so it must outlive whichever of them uploaded first.
+     */
+    private suspend fun deleteUnreferencedEvidence(candidates: List<EvidenceReference>) {
+        val unique = candidates.distinctBy(EvidenceReference::localId)
+        if (unique.isEmpty()) return
+        val referenced = observationQueue.referencedEvidenceIds()
+        for (reference in unique) {
+            if (reference.localId !in referenced) evidenceStore.delete(reference)
+        }
     }
 
     suspend fun reportPresence(): PresenceResult {
