@@ -22,10 +22,18 @@ class FileEvidenceStore(
         require(jpegQuality in 1..100) { "JPEG quality must be between 1 and 100" }
     }
 
-    override suspend fun saveImage(observationId: String, frame: VideoFrame): EvidenceReference =
+    override suspend fun saveImage(frame: VideoFrame): EvidenceReference =
         withContext(Dispatchers.IO) {
-            val fileName = "${observationId.safeFileName()}-${frame.capturedAtEpochMilliseconds}.jpg"
+            val fileName = "${frame.id.safeFileName()}-${frame.capturedAtEpochMilliseconds}.jpg"
             val destination = File(directory, fileName)
+            // Observations from the same frame share this file, so it is encoded once.
+            if (destination.exists()) {
+                return@withContext EvidenceReference(
+                    localId = fileName,
+                    mediaType = "image/jpeg",
+                    sizeBytes = destination.length(),
+                )
+            }
             val temporary = File(directory, "$fileName.tmp")
             val bitmap = frame.toUprightBitmap()
             try {

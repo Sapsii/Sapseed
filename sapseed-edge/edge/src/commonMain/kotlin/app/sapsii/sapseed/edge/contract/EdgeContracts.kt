@@ -28,7 +28,11 @@ interface ObservationFactory {
 }
 
 interface EvidenceStore {
-    suspend fun saveImage(observationId: String, frame: VideoFrame): EvidenceReference
+    /**
+     * Persists the capture for [frame]. Every observation taken from that frame receives
+     * the same reference, so one frame is stored and transferred once.
+     */
+    suspend fun saveImage(frame: VideoFrame): EvidenceReference
     suspend fun read(reference: EvidenceReference): ByteArray
     suspend fun delete(reference: EvidenceReference)
 }
@@ -38,6 +42,10 @@ interface ObservationQueue {
     suspend fun enqueue(observation: UrbanObservation): List<UrbanObservation>
     suspend fun pending(limit: Int): List<UrbanObservation>
     suspend fun remove(observationId: String)
+
+    /** Local evidence ids still referenced by queued observations. */
+    suspend fun referencedEvidenceIds(): Set<String>
+
     suspend fun stats(): ObservationQueueStats
 }
 
@@ -70,4 +78,12 @@ sealed interface PresenceResult {
 
 interface DevicePresenceReporter {
     suspend fun reportAlive(): PresenceResult
+}
+
+/**
+ * Sends this unit's own GPS fix. Reporting a position also refreshes presence, so a unit with
+ * a fix does not need a separate heartbeat.
+ */
+interface DeviceLocationReporter {
+    suspend fun reportPosition(location: GeoPoint): PresenceResult
 }

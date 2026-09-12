@@ -9,10 +9,6 @@ import app.sapsii.sapseed.edge.model.UrbanObservation
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -77,21 +73,30 @@ class HttpEventUploader(
     }
 
     private suspend fun uploadEvidence(observations: List<UrbanObservation>): Map<String, List<String>> {
+        val idsByCapture = mutableMapOf<String, String>()
         val uploaded = mutableMapOf<String, List<String>>()
         for (observation in observations) {
             val ids = mutableListOf<String>()
             for (reference in observation.evidence) {
-                val bytes = evidenceStore.read(reference)
-                val evidenceId = UUID.nameUUIDFromBytes("${observation.id}:${reference.localId}".toByteArray()).toString()
-                val checksum = MessageDigest.getInstance("SHA-256").digest(bytes).toHex()
-                val upload = reserveEvidence(evidenceId, reference, checksum)
-                putEvidence(upload, bytes)
-                completeEvidence(evidenceId)
+                // Observations from one frame share a capture, so the reservation, the PUT and the
+                // completion are performed once per image rather than once per observation.
+                val evidenceId = idsByCapture[reference.localId]
+                    ?: uploadCapture(reference).also { idsByCapture[reference.localId] = it }
                 ids += evidenceId
             }
             uploaded[observation.id] = ids
         }
         return uploaded
+    }
+
+    private suspend fun uploadCapture(reference: EvidenceReference): String {
+        val bytes = evidenceStore.read(reference)
+        val evidenceId = UUID.nameUUIDFromBytes(reference.localId.toByteArray()).toString()
+        val checksum = MessageDigest.getInstance("SHA-256").digest(bytes).toHex()
+        val upload = reserveEvidence(evidenceId, reference, checksum)
+        putEvidence(upload, bytes)
+        completeEvidence(evidenceId)
+        return evidenceId
     }
 
     private fun reserveEvidence(evidenceId: String, reference: EvidenceReference, checksum: String): SignedUpload {
@@ -242,7 +247,3 @@ class HttpEventUploader(
 private data class SignedUpload(val url: URL, val headers: Map<String, String>)
 
 private fun ByteArray.toHex(): String = joinToString("") { byte -> "%02x".format(byte) }
-
-private fun Long.toIsoTimestamp(): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-    timeZone = TimeZone.getTimeZone("UTC")
-}.format(Date(this))
